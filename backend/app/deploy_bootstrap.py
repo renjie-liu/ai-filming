@@ -39,7 +39,8 @@ ARK_PROVIDER_ID = "ark-seedance"
 _ARK_REGION_DEFAULTS: dict[str, dict[str, str]] = {
     "byteplus": {
         "base_url": "https://ark.ap-southeast.bytepluses.com/api/v3",
-        "text": "seed-1-6-250915",
+        # seed-1-6-* 在新账号上通常未开通（InvalidEndpointOrModel.NotFound），默认改用 Seed 2.0 Lite。
+        "text": "seed-2-0-lite-260428",
         "image": "seedream-4-0-250828",
         "video": "seedance-1-0-pro-250528",
     },
