@@ -86,10 +86,16 @@ run it and written its result to the database.
 
 ## Notes and limits
 
-- Seedance 2.x requests differ from 1.x, based on errors returned by the live ModelArk API:
-  in first-frame / first-and-last-frame mode the output ratio follows the first frame,
-  so `ratio` is omitted. Key frames are sent as `reference_image` (2.x rejects the
-  `key_frame` role). `duration` is clamped to 4–15 s.
+- Seedance 2.x requests differ from 1.x (per BytePlus's Dreamina Seedance 2.5 tutorial and
+  errors returned by the live ModelArk API): in first-frame / first-and-last-frame mode the
+  output ratio follows the first frame, so `ratio` is sent as `adaptive` (a fixed ratio is
+  rejected). Text-only requests keep the project ratio. Key frames are sent as
+  `reference_image` (2.x rejects the `key_frame` role). `duration` is clamped to 4–30 s on
+  Seedance 2.5 and 4–15 s on the 2.0 series.
+- Seedance 2.x can only be activated and used while the account meets BytePlus's threshold
+  (USD 30 in Credits, a USD 30+ AI Savings Plan, or a Seedance resource pack). Usage is
+  deducted from the resource pack, then the Savings Plan, then the account balance; when
+  the balance goes negative, Ark answers every model with `AccountOverdueError`.
 
 - Generation jobs run inside the API function after the response is sent and are
   bounded by the function max duration (300 s on Hobby). If a job outlives that limit,

@@ -20,10 +20,10 @@ def test_is_seedance_v2_plus() -> None:
     assert not is_seedance_v2_plus(None)
 
 
-def test_v2_first_frame_omits_ratio() -> None:
+def test_v2_first_frame_uses_adaptive_ratio() -> None:
     inp = VideoGenerationInput(prompt="p", model="dreamina-seedance-2-5-260628", ratio="16:9", seconds=5, first_frame_base64=_IMG)
     body = build_create_task_body(inp)
-    assert "ratio" not in body
+    assert body["ratio"] == "adaptive"
     assert _roles(body) == ["first_frame"]
     assert body["duration"] == 5
 
@@ -33,7 +33,9 @@ def test_v2_text_only_keeps_ratio_and_clamps_duration() -> None:
     body = build_create_task_body(inp)
     assert body["ratio"] == "9:16"
     assert body["duration"] == 4
-    inp = VideoGenerationInput(prompt="p", model="dreamina-seedance-2-5-260628", ratio="9:16", seconds=30)
+    inp = VideoGenerationInput(prompt="p", model="dreamina-seedance-2-5-260628", ratio="9:16", seconds=40)
+    assert build_create_task_body(inp)["duration"] == 30
+    inp = VideoGenerationInput(prompt="p", model="dreamina-seedance-2-0-260128", ratio="9:16", seconds=30)
     assert build_create_task_body(inp)["duration"] == 15
 
 
