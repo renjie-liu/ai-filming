@@ -149,3 +149,13 @@ async def test_discover_defaults_to_latest_enabled_seedance(mock_httpx) -> None:
     mock_httpx["transport"] = _fake_ark({"dreamina-seedance-3-0-270101", "dreamina-seedance-2-5-260628"}, catalogue=catalogue)
     plan = await ark_autoconfig.discover_ark_config("ark-test-key")
     assert plan["video"] == "dreamina-seedance-3-0-270101"
+
+
+def test_classify_probe_response_overdue_and_eu_region() -> None:
+    """欠费在参数校验前返回，探测可零成本识别；欧洲区 Base URL 能被识别为独立区域。"""
+    body = '{"error":{"code":"AccountOverdueError","message":"your account has an overdue balance"}}'
+    assert ark_autoconfig.classify_probe_response(403, body) == "overdue"
+    assert ark_autoconfig.classify_probe_response(403, '{"error":{"code":"Forbidden"}}') == "denied"
+    assert ark_autoconfig.region_from_base_url("https://ark.eu-west.bytepluses.com/api/v3") == "byteplus-eu"
+    assert ark_autoconfig.region_from_base_url("https://ark.ap-southeast.bytepluses.com/api/v3") == "byteplus"
+    assert set(ark_autoconfig.ARK_MODEL_CANDIDATES["byteplus-eu"]) == {"text", "image", "video"}

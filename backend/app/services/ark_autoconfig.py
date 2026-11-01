@@ -28,13 +28,17 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# 区域按探测优先级排列。BytePlus 的 API Key / 模型开通 / 计费状态按区域隔离；
+# 欧洲区（eu-west-1）目前仅开放 Chat 与图片生成 API（见 BytePlus 文档「Region availability」）。
 ARK_BASE_URLS: dict[str, str] = {
     "byteplus": "https://ark.ap-southeast.bytepluses.com/api/v3",
+    "byteplus-eu": "https://ark.eu-west.bytepluses.com/api/v3",
     "volcengine": "https://ark.cn-beijing.volces.com/api/v3",
 }
 
 ARK_REGION_LABELS: dict[str, str] = {
     "byteplus": "BytePlus ModelArk",
+    "byteplus-eu": "BytePlus ModelArk（欧洲）",
     "volcengine": "火山方舟",
 }
 
@@ -82,6 +86,9 @@ ARK_MODEL_CANDIDATES: dict[str, dict[str, list[str]]] = {
         ],
     },
 }
+
+# 欧洲区与亚太区使用相同的模型 ID 命名。
+ARK_MODEL_CANDIDATES["byteplus-eu"] = {k: list(v) for k, v in ARK_MODEL_CANDIDATES["byteplus"].items()}
 
 # 每个类别的「零成本探测」请求：故意缺少必填字段，已开通的模型会返回参数校验错误而不会生成内容。
 _PROBE_REQUESTS: dict[str, tuple[str, Any]] = {
@@ -143,14 +150,24 @@ def region_from_base_url(base_url: str | None) -> str:
     value = (base_url or "").lower()
     if "volces.com" in value or "volcengine" in value:
         return "volcengine"
+    if "eu-west" in value:
+        return "byteplus-eu"
     return "byteplus"
 
 
+_OVERDUE_CODES = ("accountoverdue", "insufficientbalance", "overdue balance")
+
+
 def classify_probe_response(status_code: int, body: str) -> str:
-    """把探测响应归类：available / unavailable / denied / unknown。"""
+    """把探测响应归类：available / unavailable / overdue / denied / unknown。
+
+    方舟在参数校验之前先检查账户状态，因此故意缺参的探测请求也能零成本识别「账户欠费」（overdue）。
+    """
     lowered = body.lower()
     if status_code == 404 or "notfound" in lowered or "modelnotopen" in lowered or "not activated" in lowered:
         return "unavailable"
+    if any(code in lowered for code in _OVERDUE_CODES):
+        return "overdue"
     if status_code in (401, 403):
         return "denied"
     if status_code in (400, 422) or status_code < 300:
@@ -174,17 +191,30 @@ async def probe_model(client: Any, *, base_url: str, api_key: str, category: str
     return {"model": model, "result": classify_probe_response(resp.status_code, resp.text), "http": resp.status_code, "code": code}
 
 
-async def probe_models(base_url: str, api_key: str, *, region: str | None = None) -> dict[str, list[dict[str, Any]]]:
-    """对某区域全部候选模型逐个探测（供状态页诊断使用）。"""
+async def probe_models(
+    base_url: str,
+    api_key: str,
+    *,
+    region: str | None = None,
+    extra: dict[str, list[str]] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """对某区域全部候选模型逐个探测（供状态页诊断使用）。
+
+    参数：
+    - region：候选模型所属区域，缺省时按 base_url 推断；
+    - extra：额外要探测的模型（如该区域目录中的 Seedance 模型），按类别追加在候选之后并去重。
+    """
     import httpx
 
     candidates = ARK_MODEL_CANDIDATES[region or region_from_base_url(base_url)]
     out: dict[str, list[dict[str, Any]]] = {}
     async with httpx.AsyncClient(timeout=15) as client:
         for category in _CATEGORIES:
+            models = list(candidates[category])
+            models += [m for m in (extra or {}).get(category, []) if m not in models]
             out[category] = [
                 await probe_model(client, base_url=base_url, api_key=api_key, category=category, model=model)
-                for model in candidates[category]
+                for model in models
             ]
     return out
 

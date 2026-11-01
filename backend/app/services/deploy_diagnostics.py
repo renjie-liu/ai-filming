@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import func, select, text
 
 from app.config import is_vercel_runtime, settings
-from app.services.ark_autoconfig import ARK_BASE_URLS, probe_models, resolve_ark_plan
+from app.services.ark_autoconfig import ARK_BASE_URLS, probe_models, rank_seedance_models, resolve_ark_plan
 
 
 async def _probe_ark_endpoint(base_url: str, api_key: str) -> dict[str, Any]:
@@ -50,8 +50,9 @@ async def build_deploy_status(*, probe_ark: bool = False, probe_model_availabili
     """生成部署状态报告。
 
     参数：
-    - probe_ark：对两个区域做只读连通性探测；
-    - probe_model_availability：对当前区域候选模型做零成本可用性探测。
+    - probe_ark：对所有已知区域做只读连通性探测；
+    - probe_model_availability：对当前区域候选模型做零成本可用性探测；
+      两者同时开启时，也对 Key 被认可的其它区域做同样的探测（结果在 model_availability_other_regions）。
     """
     from app.core import storage
     from app.core.db import async_session_maker, engine
@@ -85,9 +86,19 @@ async def build_deploy_status(*, probe_ark: bool = False, probe_model_availabili
     if plan is not None:
         ark.update({k: plan.get(k) for k in ("region", "base_url", "text", "image", "video", "detected")})
         if probe_ark:
-            ark["probes"] = [await _probe_ark_endpoint(base, plan["api_key"]) for base in ARK_BASE_URLS.values()]
+            ark["probes"] = [{"region": r, **await _probe_ark_endpoint(base, plan["api_key"])} for r, base in ARK_BASE_URLS.items()]
         if probe_model_availability:
             ark["model_availability"] = await probe_models(plan["base_url"], plan["api_key"], region=plan.get("region"))
+        if probe_ark and probe_model_availability:
+            # Key / 开通 / 计费状态按区域隔离：对 Key 被认可的其它区域也做零成本探测，便于判断能否换区。
+            by_region: dict[str, Any] = {}
+            for probe in ark["probes"]:
+                region = probe["region"]
+                if region == plan.get("region") or 200 not in (probe.get("models_status"), probe.get("video_tasks_status")):
+                    continue
+                extra = {"video": rank_seedance_models(probe.get("models") or [])}
+                by_region[region] = await probe_models(ARK_BASE_URLS[region], plan["api_key"], region=region, extra=extra)
+            ark["model_availability_other_regions"] = by_region
 
     broker = settings.celery_broker_url or ""
     return {
