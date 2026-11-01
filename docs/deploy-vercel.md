@@ -26,8 +26,11 @@ Connect a Neon database and a Blob store to the project (both from the project's
 
 Nothing else is needed. On the first start (and whenever the key changes) the app:
 
-1. works out which region the key belongs to (BytePlus ModelArk or Volcengine Ark)
-   with a read-only call;
+1. works out which region the key belongs to with a read-only call: BytePlus ModelArk
+   Asia (Johor, `ark.ap-southeast.bytepluses.com`), BytePlus ModelArk Europe (Dublin,
+   `ark.eu-west.bytepluses.com`) or Volcengine Ark (`ark.cn-beijing.volces.com`).
+   BytePlus API keys, model activation and billing are separate per region, and the
+   Europe region currently offers only chat and image generation, not Seedance video;
 2. picks a text, image and video model **enabled on your account**. For video it
    chooses the **newest Seedance** in your account's catalogue (currently Seedance 2.5,
    `dreamina-seedance-2-5-260628`): newest version first, flagship before fast/mini.
@@ -65,8 +68,12 @@ Ark models. Add `?probe_ark=true` to make read-only calls to the Ark API
 (list models / list video tasks; these don't generate anything or cost money).
 Add `?probe_models=true` to check which candidate Seed / Seedream / Seedance models
 your account has activated. Each model gets a deliberately incomplete request:
-`available` means the model rejected the parameters (so it is enabled), and
-`unavailable` means not found / not activated. No generation is billed. The
+`available` means the model rejected the parameters (so it is enabled),
+`unavailable` means not found / not activated, and `overdue` means Ark refused the
+request because the account has an overdue balance (`AccountOverdueError`; Ark checks
+this before validating parameters, so every enabled model reports it). No generation
+is billed. With both flags set, the same probes also run in every other region that
+accepts the key (`model_availability_other_regions`). The
 `/models` catalogue lists models that may not be activated on your account.
 No secrets are returned.
 
