@@ -28,9 +28,11 @@ Nothing else is needed. On the first start (and whenever the key changes) the ap
 
 1. works out which region the key belongs to (BytePlus ModelArk or Volcengine Ark)
    with a read-only call;
-2. picks the first text, image and video model **enabled on your account**. Each
-   candidate model gets a deliberately incomplete request, so nothing is generated
-   or billed;
+2. picks a text, image and video model **enabled on your account**. For video it
+   chooses the **newest Seedance** in your account's catalogue (currently Seedance 2.5,
+   `dreamina-seedance-2-5-260628`): newest version first, flagship before fast/mini.
+   Each candidate gets a deliberately incomplete request (no messages / no prompt / no
+   content), which is rejected before anything is generated, so nothing is billed;
 3. creates the provider and models and sets them as defaults, then caches the result
    in the database so later starts don't call Ark again.
 
@@ -76,6 +78,11 @@ model; this checks the Ark key from the job's runtime. The response returns a `t
 run it and written its result to the database.
 
 ## Notes and limits
+
+- Seedance 2.x requests differ from 1.x, based on errors returned by the live ModelArk API:
+  in first-frame / first-and-last-frame mode the output ratio follows the first frame,
+  so `ratio` is omitted. Key frames are sent as `reference_image` (2.x rejects the
+  `key_frame` role). `duration` is clamped to 4–15 s.
 
 - Generation jobs run inside the API function after the response is sent and are
   bounded by the function max duration (300 s on Hobby). If a job outlives that limit,

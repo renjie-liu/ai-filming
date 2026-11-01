@@ -87,29 +87,4 @@ export class DeployService {
             },
         });
     }
-    /**
-     * Deploy Video Compat
-     * 视频模型请求格式兼容性探测（每个请求都带一个非法字段，不会生成视频）。
-     * @returns ApiResponse_dict_ Successful Response
-     * @throws ApiError
-     */
-    public static deployVideoCompatApiV1DeployVideoCompatGet({
-        model,
-    }: {
-        /**
-         * 要探测的视频模型 ID，例如 dreamina-seedance-2-5-260628
-         */
-        model: string,
-    }): CancelablePromise<ApiResponse_dict_> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/v1/_deploy/video-compat',
-            query: {
-                'model': model,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
 }

@@ -42,12 +42,3 @@ async def deploy_selftest_result(token: str) -> ApiResponse[dict]:
     result = await read_selftest(token)
     return success_response(data={"token": token, "done": result is not None, "result": result})
 
-
-@router.get("/_deploy/video-compat", response_model=ApiResponse[dict])
-async def deploy_video_compat(
-    model: str = Query(..., description="要探测的视频模型 ID，例如 dreamina-seedance-2-5-260628"),
-) -> ApiResponse[dict]:
-    """视频模型请求格式兼容性探测（每个请求都带一个非法字段，不会生成视频）。"""
-    from app.services.deploy_diagnostics import probe_video_payload_compat
-
-    return success_response(data=await probe_video_payload_compat(model))

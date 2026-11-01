@@ -93,7 +93,7 @@ _PROBE_REQUESTS: dict[str, tuple[str, Any]] = {
 _CATEGORIES = ("text", "image", "video")
 _CACHE_PREFIX = "ark_autoconfig:"
 # 选型策略版本：策略变化（如改为「最新 Seedance」）时递增，使已缓存的探测结果失效并重新探测。
-_AUTOCONFIG_STRATEGY_VERSION = ""
+_AUTOCONFIG_STRATEGY_VERSION = "2"
 
 _SEEDANCE_ID_RE = re.compile(r"seedance-(\d+)-(\d+)(?:-([a-z0-9-]+?))?-(\d{6,8})$")
 
