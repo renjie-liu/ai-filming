@@ -106,3 +106,23 @@ async def deploy_status(probe_ark: bool = Query(False, description="是否对方
         "ark": ark,
     }
     return success_response(data=data)
+
+
+@router.get("/_deploy/selftest", response_model=ApiResponse[dict])
+async def deploy_selftest_start() -> ApiResponse[dict]:
+    """投递一个无费用的自检任务，验证 Celery broker → worker → 数据库链路；返回 token。
+
+    使用 GET 便于在浏览器中直接打开（接口受部署保护，且不调用任何模型供应商）。
+    """
+    from app.services.deploy_selftest import enqueue_selftest
+
+    return success_response(data=enqueue_selftest())
+
+
+@router.get("/_deploy/selftest/{token}", response_model=ApiResponse[dict])
+async def deploy_selftest_result(token: str) -> ApiResponse[dict]:
+    """查询自检结果：`done=false` 表示 worker 尚未执行（或队列未投递）。"""
+    from app.services.deploy_selftest import read_selftest
+
+    result = await read_selftest(token)
+    return success_response(data={"token": token, "done": result is not None, "result": result})

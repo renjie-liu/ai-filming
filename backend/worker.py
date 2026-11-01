@@ -6,6 +6,7 @@ Vercel 构建时会读取 pyproject.toml 中的 `[[tool.vercel.subscribers]] ent
 
 from app.core.celery_app import celery_app
 import app.tasks.execute_task  # noqa: F401  # 注册 task.execute
+import app.tasks.deploy_selftest  # noqa: F401  # 注册 deploy.selftest
 
 app = celery_app
 

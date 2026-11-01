@@ -71,7 +71,7 @@ def _schema_fingerprint() -> str:
 
 
 _meta = MetaData()
-_meta_table = Table(
+bootstrap_meta_table = Table(
     _META_TABLE_NAME,
     _meta,
     Column("key", String(64), primary_key=True),
@@ -80,13 +80,13 @@ _meta_table = Table(
 
 
 async def _read_meta(conn: AsyncConnection, key: str) -> str | None:
-    row = (await conn.execute(select(_meta_table.c.value).where(_meta_table.c.key == key))).first()
+    row = (await conn.execute(select(bootstrap_meta_table.c.value).where(bootstrap_meta_table.c.key == key))).first()
     return row[0] if row else None
 
 
 async def _write_meta(conn: AsyncConnection, key: str, value: str) -> None:
-    await conn.execute(_meta_table.delete().where(_meta_table.c.key == key))
-    await conn.execute(_meta_table.insert().values(key=key, value=value))
+    await conn.execute(bootstrap_meta_table.delete().where(bootstrap_meta_table.c.key == key))
+    await conn.execute(bootstrap_meta_table.insert().values(key=key, value=value))
 
 
 async def ensure_schema() -> bool:

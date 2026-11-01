@@ -36,6 +36,11 @@ Ark models. Add `?probe_ark=true` to make read-only calls to the Ark API
 (list models / list video tasks; these don't generate anything or cost money).
 No secrets are returned.
 
+`GET /api/v1/_deploy/selftest` sends a test job through the queue. The job calls no
+model provider, so it costs nothing. The response returns a `token`. Then
+`GET /api/v1/_deploy/selftest/{token}` shows `done: true` once the worker function has
+run it and written its result to the database.
+
 ## Notes and limits
 
 - Long-running generation tasks run inside the queue subscriber function and are

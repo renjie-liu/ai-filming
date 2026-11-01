@@ -31,7 +31,7 @@ if _USE_VERCEL_QUEUES:
 celery_app = Celery(
     "jellyfish",
     broker=_BROKER_URL,
-    include=["app.tasks.execute_task"],
+    include=["app.tasks.execute_task", "app.tasks.deploy_selftest"],
 )
 
 celery_app.conf.update(

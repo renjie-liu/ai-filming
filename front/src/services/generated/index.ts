@@ -249,6 +249,7 @@ export type { VideoGenerationTaskRequest } from './models/VideoGenerationTaskReq
 export type { VideoPromptPreviewResponse } from './models/VideoPromptPreviewResponse';
 
 export { DefaultService } from './services/DefaultService';
+export { DeployService } from './services/DeployService';
 export { FilmService } from './services/FilmService';
 export { HealthService } from './services/HealthService';
 export { LlmService } from './services/LlmService';
