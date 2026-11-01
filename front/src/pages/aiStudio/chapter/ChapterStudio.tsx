@@ -110,6 +110,7 @@ import { ChapterStudioMaintenancePanel } from './components/ChapterStudioMainten
 import { ChapterStudioReadinessDiagnosisPanel } from './components/ChapterStudioReadinessDiagnosisPanel'
 import { ChapterStudioVideoReadinessPanel } from './components/ChapterStudioVideoReadinessPanel'
 import { useGenerationDraft, type GenerationDraftState } from '../hooks/useGenerationDraft'
+import { useIsMobile } from '../../../hooks/useIsMobile'
 import { useTaskPageContext } from '../components/taskPageContext'
 import type { RelationTaskState } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { toRelationTaskStateFromStatusRead } from '../project/ProjectWorkbench/chapterDivisionTasks'
@@ -543,6 +544,9 @@ const ChapterStudio: React.FC = () => {
   const [videoTime, setVideoTime] = useState(0)
 
   const [filter, setFilter] = useState<ShotFilter>('all')
+  // 手机端：三栏改为单栏，按「分镜列表 / 预览 / 生成面板」切换显示。
+  const isMobile = useIsMobile()
+  const [mobilePane, setMobilePane] = useState<'list' | 'preview' | 'inspector'>('list')
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null)
   const [editingTitleValue, setEditingTitleValue] = useState('')
   const [draggingShotId, setDraggingShotId] = useState<string | null>(null)
@@ -1738,6 +1742,7 @@ const ChapterStudio: React.FC = () => {
 
   const handleSelectShot = (shotId: string, indexInFiltered: number, e: React.MouseEvent) => {
     setSelectedShotId(shotId)
+    if (isMobile && !(e.shiftKey || e.ctrlKey || e.metaKey)) setMobilePane('inspector')
     const isRange = e.shiftKey && lastSelectedIndexRef.current >= 0
     const isToggle = e.ctrlKey || e.metaKey
 
@@ -2085,11 +2090,53 @@ const ChapterStudio: React.FC = () => {
     return subtitleLines.findIndex((l) => t >= l.start && t < l.end)
   }, [selectedShot, subtitleLines, videoTime])
 
+  /** 分镜生成面板：桌面端放在右侧栏（推挤 / 覆盖模式），手机端作为单独一栏显示。 */
+  const renderInspector = () => (
+      <Inspector
+        projectId={projectId}
+        chapterId={chapterId}
+        projectVisualStyle={projectVisualStyle}
+        projectStyle={projectStyle}
+        projectDefaultVideoRatio={projectDefaultVideoRatio}
+        capabilityDefaultVideoRatio={capabilityDefaultVideoRatio}
+        videoRatioOptions={videoRatioOptions}
+        imageGenerationOptions={imageGenerationOptions}
+        keyframeResolutionProfile={keyframeResolutionProfile}
+        onChangeKeyframeResolutionProfile={setKeyframeResolutionProfile}
+        loadingDetail={loadingDetail}
+        shotDetail={shotDetail}
+        dialogLines={dialogLines}
+        frameImages={frameImages}
+        sceneLinks={sceneLinks}
+        propLinks={propLinks}
+        costumeLinks={costumeLinks}
+        shotCharacterLinks={shotCharacterLinks}
+        shotCandidateItems={shotCandidateItems}
+        shotDialogueCandidateItems={shotDialogueCandidateItems}
+        cameraUpdating={cameraUpdating}
+        promptAssetsUpdating={promptAssetsUpdating}
+        onDeleteDialogLine={deleteDialogLine}
+        onUpdatePromptScene={updatePromptScene}
+        onUpdatePromptActors={updatePromptActors}
+        onUpdatePromptProps={updatePromptProps}
+        onUpdatePromptCostumes={updatePromptCostumes}
+        selectedShot={selectedShot}
+        onUpdateShotTitle={updateShotTitleInOps}
+        onUpdateShotScriptExcerpt={updateShotScriptExcerptInOps}
+        onDeleteShotOps={deleteShotFromOps}
+        onPatchShotDetail={patchShotDetailLocal}
+        onPatchShotDetailImmediate={patchShotDetailImmediate}
+        onSelectPreviewVideo={setPreviewVideoFileId}
+        onRefreshShotFrameImages={refreshShotFrameImages}
+        onClose={() => setPrefs((p) => ({ ...p, inspectorOpen: false }))}
+      />
+  )
+
   return (
     <div className={['cs-studio w-full h-full min-h-0 flex flex-col', isResizing ? 'cs-resizing' : ''].join(' ')} ref={containerRef}>
       {/* 顶部工具栏（常驻） */}
       <div
-        className="cs-topbar flex items-center gap-4 px-4 py-3"
+        className={isMobile ? 'cs-topbar flex flex-wrap items-center gap-2 px-3 py-2' : 'cs-topbar flex items-center gap-4 px-4 py-3'}
         style={{
           flexShrink: 0,
         }}
@@ -2128,14 +2175,29 @@ const ChapterStudio: React.FC = () => {
               <Button size="small" icon={<SettingOutlined />} />
             </Tooltip>
           </Dropdown>
-          <Tooltip title={prefs.inspectorOpen ? '收起属性面板（P / Ctrl/Cmd+I）' : '展开属性面板（P / Ctrl/Cmd+I）'}>
-            <Button
-              size="small"
-              icon={prefs.inspectorOpen ? <DoubleRightOutlined /> : <DoubleLeftOutlined />}
-              onClick={() => setPrefs((p) => ({ ...p, inspectorOpen: !p.inspectorOpen }))}
-            />
-          </Tooltip>
+          {!isMobile && (
+            <Tooltip title={prefs.inspectorOpen ? '收起属性面板（P / Ctrl/Cmd+I）' : '展开属性面板（P / Ctrl/Cmd+I）'}>
+              <Button
+                size="small"
+                icon={prefs.inspectorOpen ? <DoubleRightOutlined /> : <DoubleLeftOutlined />}
+                onClick={() => setPrefs((p) => ({ ...p, inspectorOpen: !p.inspectorOpen }))}
+              />
+            </Tooltip>
+          )}
         </div>
+        {isMobile && (
+          <Segmented
+            block
+            className="w-full"
+            value={mobilePane}
+            onChange={(v) => setMobilePane(v as 'list' | 'preview' | 'inspector')}
+            options={[
+              { label: '分镜列表', value: 'list' },
+              { label: '预览', value: 'preview' },
+              { label: '生成面板', value: 'inspector' },
+            ]}
+          />
+        )}
       </div>
 
       {/* 三栏动态布局 */}
@@ -2151,8 +2213,9 @@ const ChapterStudio: React.FC = () => {
         onPointerCancel={endResize}
       >
         {/* 左侧：分镜列表 */}
+        {(!isMobile || mobilePane === 'list') && (
         <Sider
-          width={prefs.leftWidth}
+          width={isMobile ? '100%' : prefs.leftWidth}
           collapsedWidth={0}
           className="cs-left flex flex-col"
           style={{
@@ -2191,7 +2254,7 @@ const ChapterStudio: React.FC = () => {
             />
           )}
 
-          {!multiToolbarVisible && selectedShotIds.length === 1 && (
+          {!isMobile && !multiToolbarVisible && selectedShotIds.length === 1 && (
             <div className="cs-group m-3 mt-0 mb-2">
               <div className="rounded-lg border border-solid border-gray-200 bg-white/80 px-3 py-2 text-xs text-gray-600">
                 已选 1 项，继续按 <span className="font-medium text-gray-700">Command/Ctrl + 点击</span> 可加入多选
@@ -2368,23 +2431,27 @@ const ChapterStudio: React.FC = () => {
             )}
           </div>
         </Sider>
+        )}
 
-        {/* 左侧拖拽条 */}
-        <div
-          role="separator"
-          className="cs-sep h-full"
-          style={{
-            width: 10,
-            cursor: 'col-resize',
-            background: 'transparent',
-            flexShrink: 0,
-          }}
-          onPointerDown={(e) => beginResize('left', e)}
-          title="拖拽调整左侧宽度"
-        />
+        {/* 左侧拖拽条（手机端单栏布局不需要） */}
+        {!isMobile && (
+          <div
+            role="separator"
+            className="cs-sep h-full"
+            style={{
+              width: 10,
+              cursor: 'col-resize',
+              background: 'transparent',
+              flexShrink: 0,
+            }}
+            onPointerDown={(e) => beginResize('left', e)}
+            title="拖拽调整左侧宽度"
+          />
+        )}
 
         {/* 中央：主预览区 */}
-        <Content className="cs-main min-w-0 min-h-0 flex flex-col" style={{ padding: 16, position: 'relative', overflow: 'hidden' }}>
+        {(!isMobile || mobilePane === 'preview') && (
+        <Content className="cs-main min-w-0 min-h-0 flex flex-col" style={{ padding: isMobile ? 8 : 16, position: 'relative', overflow: 'auto' }}>
           <Card
             title={
               <div className="flex items-center gap-3 min-w-0">
@@ -2649,9 +2716,16 @@ const ChapterStudio: React.FC = () => {
             )}
           </Card>
         </Content>
+        )}
 
-        {/* 右侧：属性面板（推挤 / 覆盖） */}
-        {prefs.inspectorMode === 'push' ? (
+        {/* 右侧：属性面板（推挤 / 覆盖）；手机端为独立一栏 */}
+        {isMobile ? (
+          mobilePane === 'inspector' && (
+            <div className="flex-1 min-w-0 min-h-0 overflow-hidden" style={{ background: '#f9fafc' }}>
+              {renderInspector()}
+            </div>
+          )
+        ) : prefs.inspectorMode === 'push' ? (
           <>
             {/* 右侧拖拽条（推挤模式） */}
             {prefs.inspectorOpen && (
@@ -2677,44 +2751,7 @@ const ChapterStudio: React.FC = () => {
                 overflow: 'hidden',
               }}
             >
-              <Inspector
-                projectId={projectId}
-                chapterId={chapterId}
-                projectVisualStyle={projectVisualStyle}
-                projectStyle={projectStyle}
-                projectDefaultVideoRatio={projectDefaultVideoRatio}
-                capabilityDefaultVideoRatio={capabilityDefaultVideoRatio}
-                videoRatioOptions={videoRatioOptions}
-                imageGenerationOptions={imageGenerationOptions}
-                keyframeResolutionProfile={keyframeResolutionProfile}
-                onChangeKeyframeResolutionProfile={setKeyframeResolutionProfile}
-                loadingDetail={loadingDetail}
-                shotDetail={shotDetail}
-                dialogLines={dialogLines}
-                frameImages={frameImages}
-                sceneLinks={sceneLinks}
-                propLinks={propLinks}
-                costumeLinks={costumeLinks}
-                shotCharacterLinks={shotCharacterLinks}
-                shotCandidateItems={shotCandidateItems}
-                shotDialogueCandidateItems={shotDialogueCandidateItems}
-                cameraUpdating={cameraUpdating}
-                promptAssetsUpdating={promptAssetsUpdating}
-                onDeleteDialogLine={deleteDialogLine}
-                onUpdatePromptScene={updatePromptScene}
-                onUpdatePromptActors={updatePromptActors}
-                onUpdatePromptProps={updatePromptProps}
-                onUpdatePromptCostumes={updatePromptCostumes}
-                selectedShot={selectedShot}
-                onUpdateShotTitle={updateShotTitleInOps}
-                onUpdateShotScriptExcerpt={updateShotScriptExcerptInOps}
-                onDeleteShotOps={deleteShotFromOps}
-                onPatchShotDetail={patchShotDetailLocal}
-                onPatchShotDetailImmediate={patchShotDetailImmediate}
-                onSelectPreviewVideo={setPreviewVideoFileId}
-                onRefreshShotFrameImages={refreshShotFrameImages}
-                onClose={() => setPrefs((p) => ({ ...p, inspectorOpen: false }))}
-              />
+              {renderInspector()}
             </Sider>
 
             {!prefs.inspectorOpen && (
@@ -2751,44 +2788,7 @@ const ChapterStudio: React.FC = () => {
                   title="拖拽调整覆盖宽度"
                 />
                 <div className="flex-1 min-w-0 overflow-hidden">
-                  <Inspector
-                    projectId={projectId}
-                    chapterId={chapterId}
-                    projectVisualStyle={projectVisualStyle}
-                    projectStyle={projectStyle}
-                    projectDefaultVideoRatio={projectDefaultVideoRatio}
-                    capabilityDefaultVideoRatio={capabilityDefaultVideoRatio}
-                    videoRatioOptions={videoRatioOptions}
-                    imageGenerationOptions={imageGenerationOptions}
-                    keyframeResolutionProfile={keyframeResolutionProfile}
-                    onChangeKeyframeResolutionProfile={setKeyframeResolutionProfile}
-                    loadingDetail={loadingDetail}
-                    shotDetail={shotDetail}
-                    dialogLines={dialogLines}
-                    frameImages={frameImages}
-                    sceneLinks={sceneLinks}
-                    propLinks={propLinks}
-                    costumeLinks={costumeLinks}
-                    shotCharacterLinks={shotCharacterLinks}
-                    shotCandidateItems={shotCandidateItems}
-                    shotDialogueCandidateItems={shotDialogueCandidateItems}
-                    cameraUpdating={cameraUpdating}
-                    promptAssetsUpdating={promptAssetsUpdating}
-                    onDeleteDialogLine={deleteDialogLine}
-                    onUpdatePromptScene={updatePromptScene}
-                    onUpdatePromptActors={updatePromptActors}
-                    onUpdatePromptProps={updatePromptProps}
-                    onUpdatePromptCostumes={updatePromptCostumes}
-                    selectedShot={selectedShot}
-                    onUpdateShotTitle={updateShotTitleInOps}
-                    onUpdateShotScriptExcerpt={updateShotScriptExcerptInOps}
-                    onDeleteShotOps={deleteShotFromOps}
-                    onPatchShotDetail={patchShotDetailLocal}
-                    onPatchShotDetailImmediate={patchShotDetailImmediate}
-                    onSelectPreviewVideo={setPreviewVideoFileId}
-                    onRefreshShotFrameImages={refreshShotFrameImages}
-                    onClose={() => setPrefs((p) => ({ ...p, inspectorOpen: false }))}
-                  />
+                  {renderInspector()}
                 </div>
               </div>
             )}
@@ -2980,6 +2980,8 @@ function Inspector(props: {
   const [audioMode, setAudioMode] = useState<'none' | 'prompt' | 'upload'>('none')
   const [hideShot, setHideShot] = useState(false)
   const [inspectorTabKey, setInspectorTabKey] = useState<InspectorTabKey>('camera')
+  // 手机端宽度有限：标签页放到顶部，内容区占满宽度。
+  const inspectorIsMobile = useIsMobile()
   const [sceneNameMap, setSceneNameMap] = useState<Record<string, string>>({})
   const [characterNameMap, setCharacterNameMap] = useState<Record<string, string>>({})
   const [linkRoleOpen, setLinkRoleOpen] = useState(false)
@@ -4716,7 +4718,7 @@ function Inspector(props: {
 
       <div className="cs-inspector flex-1 min-h-0 overflow-auto">
         <Tabs
-          tabPosition="left"
+          tabPosition={inspectorIsMobile ? 'top' : 'left'}
           activeKey={inspectorTabKey}
           onChange={(activeKey) => setInspectorTabKey(activeKey as InspectorTabKey)}
           items={(() => {

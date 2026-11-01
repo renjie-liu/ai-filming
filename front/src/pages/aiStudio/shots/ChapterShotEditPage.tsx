@@ -40,6 +40,7 @@ import {
 } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { StudioEntitiesApi } from '../../../services/studioEntities'
 import { resolveAssetUrl } from '../assets/utils'
+import { useIsMobile } from '../../../hooks/useIsMobile'
 
 const { Header, Content } = Layout
 const extractTaskCopy = TASK_COPY.scriptExtract
@@ -181,6 +182,8 @@ function overviewTypeToAssetKind(kind: ShotAssetOverviewItem['type']): AssetKind
 
 export function ChapterShotEditPage() {
   const navigate = useNavigate()
+  // 手机端：左侧镜头列表与右侧详情改为上下排列，整页纵向滚动。
+  const isMobile = useIsMobile()
   const { projectId, chapterId, shotId } = useParams<{
     projectId: string
     chapterId: string
@@ -1540,7 +1543,15 @@ export function ChapterShotEditPage() {
           ) : !shot ? (
             <Empty description="无法加载分镜" />
           ) : (
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12, overflow: 'hidden' }}>
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                gap: 12,
+                ...(isMobile ? { flexDirection: 'column', overflow: 'auto' } : { overflow: 'hidden' }),
+              }}
+            >
               <Card
                 size="small"
                 title={
@@ -1584,10 +1595,12 @@ export function ChapterShotEditPage() {
                   </div>
                 }
                 style={{
-                  width: 320,
-                  minWidth: 260,
-                  maxWidth: 420,
-                  height: '100%',
+                  width: isMobile ? '100%' : 320,
+                  minWidth: isMobile ? 0 : 260,
+                  maxWidth: isMobile ? 'none' : 420,
+                  height: isMobile ? 'auto' : '100%',
+                  maxHeight: isMobile ? '45vh' : undefined,
+                  flexShrink: 0,
                   minHeight: 0,
                   overflow: 'hidden',
                   display: 'flex',
@@ -1744,15 +1757,15 @@ export function ChapterShotEditPage() {
                   </div>
                 }
                 style={{
-                  flex: 1,
+                  flex: isMobile ? 'none' : 1,
                   minWidth: 0,
-                  height: '100%',
+                  height: isMobile ? 'auto' : '100%',
                   minHeight: 0,
                   overflow: 'hidden',
                   display: 'flex',
                   flexDirection: 'column',
                 }}
-                bodyStyle={{ padding: 12, flex: 1, minHeight: 0, overflow: 'auto' }}
+                bodyStyle={{ padding: 12, flex: 1, minHeight: 0, overflow: isMobile ? 'visible' : 'auto' }}
               >
                 <Tabs
                   activeKey={editorTabKey}

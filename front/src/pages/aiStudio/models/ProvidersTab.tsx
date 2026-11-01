@@ -33,6 +33,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons'
 import { LlmService } from '../../../services/generated/services/LlmService'
+import { useIsMobile } from '../../../hooks/useIsMobile'
 import type { ProviderRead, ProviderStatus, ProviderSupportedRead } from '../../../services/generated'
 import {
   PROVIDER_STATUS_MAP,
@@ -44,6 +45,7 @@ import {
 } from './constants'
 
 export default function ProvidersTab() {
+  const isMobile = useIsMobile()
   const [providers, setProviders] = useState<ProviderRead[]>([])
   const [supportedSpecs, setSupportedSpecs] = useState<ProviderSupportedRead[]>([])
   const [supportedLoading, setSupportedLoading] = useState(true)
@@ -53,7 +55,7 @@ export default function ProvidersTab() {
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
   const [selectedProvider, setSelectedProvider] = useState<ProviderRead | null>(null)
   const [detailPanelOpen, setDetailPanelOpen] = useState(false)
-  const [treeCollapsed, setTreeCollapsed] = useState(false)
+  const [treeCollapsed, setTreeCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
   const [providerModalOpen, setProviderModalOpen] = useState(false)
   const [providerEditing, setProviderEditing] = useState<ProviderRead | null>(null)
   const [testConnecting, setTestConnecting] = useState(false)
@@ -390,6 +392,8 @@ export default function ProvidersTab() {
       </div>
 
       <Layout className="flex-1 min-h-0 flex-row overflow-hidden">
+        {/* 供应商筛选栏仅为占位说明，手机端隐藏以留出空间 */}
+        {!isMobile && (
         <div
           className="flex-shrink-0 border-r border-gray-200 bg-white overflow-auto"
           style={{ width: treeCollapsed ? 48 : 200 }}
@@ -416,8 +420,9 @@ export default function ProvidersTab() {
             </>
           )}
         </div>
+        )}
 
-        <div className="flex-1 min-w-0 overflow-auto p-4 bg-gray-50">
+        <div className={`flex-1 min-w-0 overflow-auto bg-gray-50 ${isMobile ? 'p-2' : 'p-4'}`}>
           <div className="flex justify-end gap-1 mb-2">
             <Button
               type={viewMode === 'table' ? 'primary' : 'default'}

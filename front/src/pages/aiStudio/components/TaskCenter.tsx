@@ -16,6 +16,7 @@ import {
   useTaskUiStore,
 } from './taskUiStore'
 import { useResolvedTaskCenterTasks } from './taskCenterMeta'
+import { useIsMobile } from '../../../hooks/useIsMobile'
 
 const TASK_CENTER_OPEN_STORAGE_KEY = 'jellyfish_task_center_open_v1'
 const TASK_CENTER_POSITION_STORAGE_KEY = 'jellyfish_task_center_position_v1'
@@ -115,6 +116,7 @@ function taskTone(task: TaskUiItem): { color: string; label: string } {
 }
 
 export function TaskCenter() {
+  const isMobile = useIsMobile()
   const navigate = useNavigate()
   const [scopeFilter, setScopeFilter] = useState<'auto' | 'all' | 'current' | 'active' | 'settled'>('auto')
   const [taskKindFilter, setTaskKindFilter] = useState<string | undefined>(undefined)
@@ -506,7 +508,8 @@ export function TaskCenter() {
         <Button
           type="primary"
           size="middle"
-          shape="round"
+          shape={isMobile ? 'circle' : 'round'}
+          aria-label={open ? '收起任务' : '任务中心'}
           icon={<UnorderedListOutlined />}
           onClick={handleButtonClick}
           onPointerDown={handleButtonPointerDown}
@@ -515,10 +518,13 @@ export function TaskCenter() {
           onPointerCancel={handleButtonPointerUp}
           className="shadow-lg pointer-events-auto touch-none select-none"
         >
-          <span className="inline-flex items-center gap-1">
-            <span>{open ? '收起任务' : '任务中心'}</span>
-            <PushpinOutlined className="text-[11px] opacity-70" />
-          </span>
+          {/* 手机端只显示图标，减少对页面内容的遮挡 */}
+          {!isMobile && (
+            <span className="inline-flex items-center gap-1">
+              <span>{open ? '收起任务' : '任务中心'}</span>
+              <PushpinOutlined className="text-[11px] opacity-70" />
+            </span>
+          )}
         </Button>
       </Badge>
     </div>

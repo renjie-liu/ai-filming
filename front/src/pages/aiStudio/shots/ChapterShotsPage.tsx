@@ -40,6 +40,7 @@ import { useTaskPageContext } from '../components/taskPageContext'
 import { createTaskSettledReloader } from '../components/taskResultHelpers'
 import { TASK_COPY } from '../components/taskCopy'
 import { toChineseErrorMessage } from '../../../utils/errorMessage'
+import { useIsMobile } from '../../../hooks/useIsMobile'
 
 const { Header, Content } = Layout
 type ShotListFilter = 'all' | 'pending' | 'generating' | 'ready'
@@ -98,6 +99,7 @@ function getShotPreparationState(shot: ShotRead, runtime?: ShotRuntimeState): Sh
 export function ChapterShotsPage() {
   const taskCopy = TASK_COPY.chapterDivision
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const { projectId, chapterId } = useParams<{ projectId: string; chapterId: string }>()
   const [loading, setLoading] = useState(false)
   const [extracting, setExtracting] = useState(false)
@@ -520,22 +522,23 @@ export function ChapterShotsPage() {
     <Layout style={{ height: '100%', minHeight: 0, background: '#eef2f7' }}>
       <Header
         style={{
-          padding: '0 16px',
+          padding: isMobile ? '0 12px' : '0 16px',
           background: '#fff',
           borderBottom: '1px solid #e2e8f0',
           boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
           display: 'flex',
           alignItems: 'center',
-          gap: 12,
+          gap: isMobile ? 8 : 12,
         }}
       >
         <Link
           to={`/projects/${projectId}?tab=chapters`}
-          className="text-gray-600 hover:text-blue-600 flex items-center gap-1"
+          className="text-gray-600 hover:text-blue-600 flex items-center gap-1 shrink-0"
+          aria-label="返回章节列表"
         >
-          <ArrowLeftOutlined /> 返回章节列表
+          <ArrowLeftOutlined /> {!isMobile && '返回章节列表'}
         </Link>
-        <Divider type="vertical" />
+        {!isMobile && <Divider type="vertical" />}
 
         <div className="min-w-0 flex-1 overflow-hidden">
           <Typography.Text
@@ -561,14 +564,16 @@ export function ChapterShotsPage() {
               icon={<FileSearchOutlined />}
               onClick={() => navigate(getChapterStudioPath(projectId, chapterId))}
             >
-              进入分镜工作室
+              {isMobile ? '工作室' : '进入分镜工作室'}
             </Button>
-            <Button
-              icon={<VideoCameraOutlined />}
-              onClick={() => navigate(getChapterStudioPath(projectId, chapterId))}
-            >
-              继续当前镜头
-            </Button>
+            {!isMobile && (
+              <Button
+                icon={<VideoCameraOutlined />}
+                onClick={() => navigate(getChapterStudioPath(projectId, chapterId))}
+              >
+                继续当前镜头
+              </Button>
+            )}
           </Space>
         ) : null}
       </Header>

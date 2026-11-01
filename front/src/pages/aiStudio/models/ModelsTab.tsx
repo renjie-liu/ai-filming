@@ -33,6 +33,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { LlmService } from '../../../services/generated/services/LlmService'
+import { useIsMobile } from '../../../hooks/useIsMobile'
 import type {
   ModelRead,
   ModelCategoryKey,
@@ -50,6 +51,7 @@ import {
 } from './constants'
 
 export default function ModelsTab() {
+  const isMobile = useIsMobile()
   const [providers, setProviders] = useState<ProviderRead[]>([])
   const [supportedProviders, setSupportedProviders] = useState<ProviderSupportedRead[]>([])
   const [models, setModels] = useState<ModelRead[]>([])
@@ -59,7 +61,7 @@ export default function ModelsTab() {
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
   const [selectedModel, setSelectedModel] = useState<ModelRead | null>(null)
   const [detailPanelOpen, setDetailPanelOpen] = useState(false)
-  const [treeCollapsed, setTreeCollapsed] = useState(false)
+  const [treeCollapsed, setTreeCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
   const [categoryFilter, setCategoryFilter] = useState<ModelCategoryKey | null>(null)
   const [modelModalOpen, setModelModalOpen] = useState(false)
   const [modelEditing, setModelEditing] = useState<ModelRead | null>(null)
@@ -469,7 +471,7 @@ export default function ModelsTab() {
           )}
         </div>
 
-        <div className="flex-1 min-w-0 overflow-auto p-4 bg-gray-50">
+        <div className={`flex-1 min-w-0 overflow-auto bg-gray-50 ${isMobile ? 'p-2' : 'p-4'}`}>
           <div className="flex justify-end gap-1 mb-2">
             <Button
               type={viewMode === 'table' ? 'primary' : 'default'}

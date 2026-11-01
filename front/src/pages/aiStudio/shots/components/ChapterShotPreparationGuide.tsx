@@ -44,7 +44,8 @@ export function ChapterShotPreparationGuide({
       }}
     >
       <div className="flex flex-wrap items-center gap-2 justify-between">
-        <div className="min-w-0 flex-1">
+        {/* basis：窄屏下标题占满一行，操作按钮自动换到下一行，避免与文字重叠 */}
+        <div className="min-w-0 flex-1 basis-56">
           <div className="flex flex-wrap items-center gap-2">
             <Tag color={statusReady ? 'green' : 'gold'} className="m-0">
               {statusReady ? '准备完成' : '待继续准备'}

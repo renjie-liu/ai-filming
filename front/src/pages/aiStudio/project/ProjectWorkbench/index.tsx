@@ -22,6 +22,7 @@ import { getChapterShotsPath, getChapterStudioPath, getProjectEditorPath } from 
 import { useProject, useChapters } from './hooks/useProjectData'
 import { ensureHasShotsBeforeShooting } from './ensureHasShotsBeforeShooting'
 import { getChapterPreparationState } from './chapterPreparation'
+import { useIsMobile } from '../../../../hooks/useIsMobile'
 
 const TAB_PARAM = 'tab'
 const CREATE_PARAM = 'create'
@@ -30,6 +31,7 @@ const EDIT_PARAM = 'edit'
 const ProjectWorkbench: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const [searchParams, setSearchParams] = useSearchParams()
   const tabFromUrl = searchParams.get(TAB_PARAM)
   const resolvedTab: TabKey =
@@ -185,7 +187,7 @@ const ProjectWorkbench: React.FC = () => {
     <div className="h-full min-h-0 flex flex-col">
       <div
         className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm"
-        style={{ margin: -5, marginBottom: 0, padding: '16px 24px' }}
+        style={{ margin: -5, marginBottom: 0, padding: isMobile ? '8px 12px' : '16px 24px' }}
       >
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-gray-100">
           <Tabs
@@ -203,7 +205,7 @@ const ProjectWorkbench: React.FC = () => {
               ),
             }))}
           />
-          <Space size="small" wrap className="shrink-0">
+          <Space size="small" wrap className={isMobile ? 'w-full' : 'shrink-0'}>
             <Button
               type="primary"
               icon={primaryCta.icon}
@@ -212,7 +214,7 @@ const ProjectWorkbench: React.FC = () => {
               {primaryCta.label}
             </Button>
             <Button icon={<VideoCameraFilled />} onClick={() => projectId && navigate(getProjectEditorPath(projectId))}>
-              进入后期剪辑
+              {isMobile ? '后期剪辑' : '进入后期剪辑'}
             </Button>
             <Dropdown menu={{ items: moreMenuItems }} placement="bottomRight">
               <Button icon={<EllipsisOutlined />}>更多</Button>

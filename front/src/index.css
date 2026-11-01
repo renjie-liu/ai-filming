@@ -28,3 +28,31 @@ code {
   font-family: 'Courier New', monospace;
 }
 
+
+/*
+ * 手机端（< 768px）通用适配：
+ * - 表格内容超出屏幕时横向滑动查看（不再挤压或截断右侧的「操作」列）；
+ * - 页面级工具栏允许换行；
+ * - 卡片 / 弹窗内边距收紧，给内容留出空间。
+ */
+@media (max-width: 767px) {
+  .ant-table-wrapper .ant-table-content {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ant-table-wrapper .ant-table-content > table {
+    min-width: 640px;
+  }
+  .ant-card .ant-card-head {
+    padding: 0 12px;
+  }
+  .ant-card .ant-card-body {
+    padding: 12px;
+  }
+  .ant-modal .ant-modal-content {
+    padding: 16px;
+  }
+  .ant-tabs-nav {
+    margin-bottom: 8px !important;
+  }
+}
