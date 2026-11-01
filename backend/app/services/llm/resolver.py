@@ -179,7 +179,21 @@ def _build_chat_openai_model(
 
     if not thinking:
         extra_body = dict(kwargs.get("extra_body") or {})
-        extra_body["enable_thinking"] = False
+        if _is_ark_provider(provider):
+            # 方舟（Seed / Doubao）关闭深度思考的参数是 thinking.type=disabled。
+            extra_body.setdefault("thinking", {"type": "disabled"})
+        else:
+            extra_body["enable_thinking"] = False
         kwargs["extra_body"] = extra_body
 
     return ChatOpenAI(**kwargs)
+
+
+def _is_ark_provider(provider: Provider) -> bool:
+    """供应商是否为火山方舟 / BytePlus ModelArk（OpenAI 兼容 Chat 接口）。"""
+    from app.services.llm.provider_registry import resolve_provider_key_from_name
+
+    try:
+        return resolve_provider_key_from_name(provider.name) == "volcengine"
+    except Exception:  # noqa: BLE001 - 未注册名称按非方舟处理
+        return False

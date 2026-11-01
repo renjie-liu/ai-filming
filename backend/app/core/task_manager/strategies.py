@@ -79,7 +79,9 @@ class AsyncPollingDeliveryStrategy(DeliveryStrategy):
         super().__init__(store)
         self._worker_fn = worker_fn
         def _spawn(coro: Awaitable[None]) -> None:
-            asyncio.create_task(coro)
+            from app.core.background import spawn_background
+
+            spawn_background(coro)  # type: ignore[arg-type]
 
         self._background_runner = background_runner or _spawn
 

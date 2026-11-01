@@ -21,8 +21,9 @@ def bootstrap_builtin_providers() -> None:
             ProviderSpec(
                 key="volcengine",
                 display_name="火山引擎",
-                aliases=("火山引擎", "volcengine", "volc", "doubao", "bytedance", "ark"),
-                supported_categories=(ModelCategoryKey.image, ModelCategoryKey.video),
+                aliases=("火山引擎", "volcengine", "volc", "doubao", "bytedance", "ark", "byteplus", "modelark"),
+                # 方舟 Chat Completions 为 OpenAI 兼容接口，文本模型（Seed / Doubao）同样可用。
+                supported_categories=(ModelCategoryKey.text, ModelCategoryKey.image, ModelCategoryKey.video),
                 default_base_url="https://ark.cn-beijing.volces.com/api/v3",
             ),
             ProviderSpec(

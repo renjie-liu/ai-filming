@@ -202,6 +202,12 @@ cd front
 pnpm run openapi:update
 ```
 
+## ▲ Vercel
+
+This repository can be deployed to Vercel as a single project (frontend, FastAPI API,
+Celery workers on Vercel Queues, Neon Postgres, Vercel Blob). See
+[docs/deploy-vercel.md](./docs/deploy-vercel.md).
+
 ## 🐳 Docker Compose
 
 The repository includes a ready-to-run compose setup under

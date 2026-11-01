@@ -1,0 +1,8 @@
+# Not needed at runtime on Vercel
+docs/
+deploy/
+backend/tests/
+backend/.venv/
+front/node_modules/
+front/dist/
+*.log

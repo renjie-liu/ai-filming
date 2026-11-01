@@ -57,6 +57,10 @@ async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化，关闭时清理。"""
     # 启动时：供应商注册 + 任务执行器注册（幂等）
     bootstrap_all_registries()
+    # 无 init 容器的环境（Vercel）：建表 + 系统提示词 + 方舟供应商（幂等，失败不阻断启动）
+    from app.deploy_runtime import ensure_bootstrapped
+
+    await ensure_bootstrapped()
     yield
     # 关闭时：清理资源
     pass
@@ -82,6 +86,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if settings.auto_init_db:
+
+    @app.middleware("http")
+    async def _ensure_bootstrapped_middleware(request: Request, call_next):
+        """部分 serverless 运行时不触发 ASGI lifespan，这里在首个请求时兜底执行部署引导。"""
+        from app.deploy_runtime import ensure_bootstrapped
+
+        await ensure_bootstrapped()
+        return await call_next(request)
+
 
 app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
 # 影视技能路由同时挂到主应用，保证 /api/v1/film 一定可访问

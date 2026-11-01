@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, BinaryIO
 
+import os
+
 from anyio import to_thread
 import boto3
 from botocore.client import Config as BotoConfig
@@ -29,6 +31,34 @@ class StoredFileInfo:
     content_type: str | None = None
     etag: str | None = None
     extra: dict[str, Any] | None = None
+
+
+def storage_backend() -> str:
+    """当前对象存储后端：`s3`（显式配置了 bucket）或 `vercel_blob`（存在 Blob 凭证）。"""
+    if settings.s3_bucket_name:
+        return "s3"
+    if (
+        settings.blob_read_write_token
+        or os.environ.get("BLOB_READ_WRITE_TOKEN")
+        or os.environ.get("VERCEL_BLOB_READ_WRITE_TOKEN")
+        or os.environ.get("BLOB_STORE_ID")
+    ):
+        return "vercel_blob"
+    return "s3"
+
+
+def _use_blob() -> bool:
+    return storage_backend() == "vercel_blob"
+
+
+def _blob_access() -> str:
+    return "private" if (settings.blob_access or "").strip().lower() == "private" else "public"
+
+
+def _ensure_blob_token_env() -> None:
+    """vercel-blob SDK 只读取环境变量；若通过 settings/.env 提供 token，则同步到环境变量。"""
+    if settings.blob_read_write_token and not os.environ.get("BLOB_READ_WRITE_TOKEN"):
+        os.environ["BLOB_READ_WRITE_TOKEN"] = settings.blob_read_write_token
 
 
 def _build_s3_client():
@@ -77,6 +107,10 @@ def init_storage() -> None:
     - 若无权限/配置错误会抛出异常，便于在部署时尽早失败；
     - 对于部分 S3 兼容服务（MinIO 等），CreateBucket 的参数可能不同，这里尽量兼容常见情形。
     """
+    if _use_blob():
+        # Vercel Blob store 由平台创建并通过环境变量注入凭证，无需初始化。
+        return
+
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if not bucket:
@@ -126,6 +160,9 @@ async def upload_file(
     - extra_args：透传给 boto3 的 ExtraArgs，如 {"ACL": "public-read"}。
     """
 
+    if _use_blob():
+        return await _blob_upload(key=key, data=data, content_type=content_type)
+
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if bucket is None:
@@ -153,6 +190,9 @@ async def upload_file(
 
 async def download_file(*, key: str) -> bytes:
     """下载文件内容（整个对象读入内存）。"""
+    if _use_blob():
+        return await _blob_download(key=key)
+
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if bucket is None:
@@ -170,6 +210,9 @@ async def download_file(*, key: str) -> bytes:
 
 async def get_file_info(*, key: str) -> StoredFileInfo:
     """获取文件元信息（不下载内容）。"""
+    if _use_blob():
+        return await _blob_head(key=key)
+
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if bucket is None:
@@ -199,6 +242,9 @@ async def get_file_info(*, key: str) -> StoredFileInfo:
 
 async def list_files(*, prefix: str = "") -> list[StoredFileInfo]:
     """根据前缀列出文件（最多一页，若需翻页可扩展）。"""
+    if _use_blob():
+        return await _blob_list(prefix=prefix)
+
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if bucket is None:
@@ -230,6 +276,10 @@ async def list_files(*, prefix: str = "") -> list[StoredFileInfo]:
 
 async def delete_file(*, key: str) -> None:
     """删除文件。"""
+    if _use_blob():
+        await _blob_delete(key=key)
+        return
+
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if bucket is None:
@@ -242,3 +292,78 @@ async def delete_file(*, key: str) -> None:
 
     await to_thread.run_sync(_delete)
 
+
+
+# ---------------------------------------------------------------------------
+# Vercel Blob 后端
+#
+# 说明：
+# - key 语义与 S3 一致（逻辑 key + 可选 s3_base_path 前缀），作为 Blob pathname；
+# - 允许覆盖同名对象，保持与 S3 put_object 相同的语义；
+# - 默认 public store：返回的 url 可直接在浏览器预览（key 中通常包含 uuid）。
+# ---------------------------------------------------------------------------
+
+
+def _blob_module():
+    _ensure_blob_token_env()
+    from vercel import blob as vercel_blob
+
+    return vercel_blob
+
+
+async def _blob_upload(*, key: str, data: bytes | BinaryIO, content_type: str | None) -> StoredFileInfo:
+    vercel_blob = _blob_module()
+    pathname = _normalize_key(key)
+    body = bytes(data) if isinstance(data, (bytes, bytearray, memoryview)) else data.read()
+    result = await vercel_blob.put_blob(
+        pathname,
+        body,
+        access=_blob_access(),  # type: ignore[arg-type]
+        content_type=content_type,
+        allow_overwrite=True,
+    )
+    return StoredFileInfo(key=pathname, url=result.url, size=len(body), content_type=content_type, etag=result.etag)
+
+
+async def _blob_download(*, key: str) -> bytes:
+    vercel_blob = _blob_module()
+    result = await vercel_blob.get_blob(_normalize_key(key), access=_blob_access())  # type: ignore[arg-type]
+    return result.body
+
+
+async def _blob_head(*, key: str) -> StoredFileInfo:
+    vercel_blob = _blob_module()
+    pathname = _normalize_key(key)
+    meta = await vercel_blob.head_blob(pathname)
+    return StoredFileInfo(
+        key=pathname,
+        url=meta.url,
+        size=int(meta.size or 0),
+        content_type=meta.content_type,
+        etag=meta.etag,
+        extra={"uploaded_at": meta.uploaded_at, "download_url": meta.download_url},
+    )
+
+
+async def _blob_list(*, prefix: str = "") -> list[StoredFileInfo]:
+    vercel_blob = _blob_module()
+    normalized_prefix = _normalize_key(prefix) if prefix else settings.s3_base_path.strip().strip("/")
+    results: list[StoredFileInfo] = []
+    async for item in vercel_blob.query_blobs(prefix=normalized_prefix or None, page_size=1000):
+        results.append(
+            StoredFileInfo(
+                key=item.pathname,
+                url=item.url,
+                size=int(item.size or 0),
+                etag=item.etag,
+                extra={"LastModified": item.uploaded_at},
+            )
+        )
+        if len(results) >= 1000:
+            break
+    return results
+
+
+async def _blob_delete(*, key: str) -> None:
+    vercel_blob = _blob_module()
+    await vercel_blob.delete_blob(_normalize_key(key))

@@ -688,7 +688,9 @@ async def run_merge_task(task_id: str) -> None:
 
 
 def spawn_merge_task(task_id: str) -> None:
-    asyncio.create_task(run_merge_task(task_id))
+    from app.core.background import spawn_background
+
+    spawn_background(run_merge_task(task_id))
 def spawn_consistency_task(task_id: str) -> None:
     from app.tasks.execute_task import enqueue_task_execution
 
@@ -740,7 +742,9 @@ async def run_variant_task(task_id: str) -> None:
 
 
 def spawn_variant_task(task_id: str) -> None:
-    asyncio.create_task(run_variant_task(task_id))
+    from app.core.background import spawn_background
+
+    spawn_background(run_variant_task(task_id))
 def spawn_character_portrait_task(task_id: str) -> None:
     from app.tasks.execute_task import enqueue_task_execution
 

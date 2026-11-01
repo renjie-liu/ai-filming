@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": "front/",
+      "framework": "vite"
+    },
+    "api": {
+      "root": "backend/",
+      "framework": "fastapi",
+      "entrypoint": "app.main:app"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "api" } },
+    { "source": "/docs", "destination": { "service": "api" } },
+    { "source": "/redoc", "destination": { "service": "api" } },
+    { "source": "/openapi.json", "destination": { "service": "api" } },
+    { "source": "/assets/(.*)", "destination": { "service": "web" } },
+    { "source": "/(env\\.js|logo\\.svg|mockServiceWorker\\.js)", "destination": { "service": "web" } },
+    { "source": "/(.*)", "destination": { "service": "web", "path": "/index.html" } }
+  ]
+}

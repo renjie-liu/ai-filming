@@ -10,7 +10,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
-from app.core.db import Base
+from app.core.db import Base, engine_options
 
 
 def _to_sync_database_url(url: str) -> str:
@@ -18,15 +18,18 @@ def _to_sync_database_url(url: str) -> str:
         return "mysql+pymysql://" + url.removeprefix("mysql+aiomysql://")
     if url.startswith("sqlite+aiosqlite:///"):
         return "sqlite:///" + url.removeprefix("sqlite+aiosqlite:///")
+    # postgresql+psycopg:// 同一 URL 既可用于异步也可用于同步引擎，无需转换。
     return url
 
 
 def _build_sync_engine() -> Engine:
+    url = _to_sync_database_url(settings.database_url)
+    options = {"pool_pre_ping": True, **engine_options(url)}
     return create_engine(
-        _to_sync_database_url(settings.database_url),
+        url,
         echo=settings.debug,
         future=True,
-        pool_pre_ping=True,
+        **options,
     )
 
 

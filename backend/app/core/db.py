@@ -13,11 +13,30 @@ from sqlalchemy.orm import DeclarativeBase
 from app.config import settings
 
 
+def engine_options(url: str) -> dict[str, Any]:
+    """按方言返回引擎参数（同步 / 异步引擎共用）。
+
+    Postgres（Neon 等托管库，通常经 PgBouncer 连接池）：
+    - `prepare_threshold=None` 关闭 psycopg 服务端预编译语句，兼容 PgBouncer transaction 模式；
+    - `pool_pre_ping` + `pool_recycle` 处理 serverless 冻结 / 托管库空闲断连。
+    """
+    if url.startswith("postgresql+psycopg://"):
+        return {
+            "pool_pre_ping": True,
+            "pool_recycle": 300,
+            "pool_size": 5,
+            "max_overflow": 5,
+            "connect_args": {"prepare_threshold": None},
+        }
+    return {}
+
+
 def _build_engine() -> AsyncEngine:
     return create_async_engine(
         settings.database_url,
         echo=settings.debug,
         future=True,
+        **engine_options(settings.database_url),
     )
 
 

@@ -32,6 +32,24 @@ from app.services.worker.task_logging import log_task_event
 logger = logging.getLogger(__name__)
 
 
+def _run_coroutine_blocking(coro: Awaitable[Any]) -> Any:
+    """在独立事件循环中同步执行协程。
+
+    Celery prefork/solo worker 线程里没有运行中的事件循环，直接 `asyncio.run` 即可；
+    若宿主（例如 Vercel Queues 推送触发的 worker 函数）已在当前线程运行事件循环，
+    则改在新线程中执行，避免 `asyncio.run() cannot be called from a running event loop`。
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)  # type: ignore[arg-type]
+
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()  # type: ignore[arg-type]
+
+
 @dataclass(slots=True)
 class WorkerTaskContext:
     task_id: str
@@ -224,7 +242,7 @@ class AbstractAsyncDelegatingExecutor(AbstractWorkerTaskExecutor):
         try:
             run_args = self._load_run_args(task_id)
             timeout_seconds = self._resolve_timeout_seconds(run_args)
-            asyncio.run(self._run_async_with_runtime(task_id, run_args, timeout_seconds))
+            _run_coroutine_blocking(self._run_async_with_runtime(task_id, run_args, timeout_seconds))
             self._log_event("succeeded", task_id, elapsed_ms=self._elapsed_ms(started_at))
         except TimeoutError as exc:
             error = str(exc)
