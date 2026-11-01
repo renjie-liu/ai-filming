@@ -148,7 +148,9 @@ async def upload_file(
     display_name = _build_display_name(file.filename, name)
     content = await file.read()
 
-    key = f"files/{file.filename}"
+    # 每次上传使用独立目录：同名文件不再互相覆盖 / 误删，也避免对象存储 CDN 对同一路径的旧缓存（含删除后的 404）。
+    # 下载文件名取 storage_key 的最后一段，仍为原始文件名。
+    key = f"files/{uuid.uuid4().hex}/{file.filename}"
     info = await storage.upload_file(
         key=key,
         data=content,
