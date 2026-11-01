@@ -14,17 +14,23 @@ export class DeployService {
      */
     public static deployStatusApiV1DeployStatusGet({
         probeArk = false,
+        probeModels = false,
     }: {
         /**
          * 是否对方舟 API 做只读连通性探测
          */
         probeArk?: boolean,
+        /**
+         * 是否对候选模型做零成本可用性探测（故意缺参请求，不产生生成）
+         */
+        probeModels?: boolean,
     }): CancelablePromise<ApiResponse_dict_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/_deploy/status',
             query: {
                 'probe_ark': probeArk,
+                'probe_models': probeModels,
             },
             errors: {
                 422: `Validation Error`,

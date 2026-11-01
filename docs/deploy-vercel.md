@@ -24,7 +24,7 @@ API service; everything else goes to the SPA.
 | `SEEDDANCE_API_KEY` (or `ARK_API_KEY`) | recommended | Ark / BytePlus ModelArk API key. On startup the app creates provider `ark-seedance` with a text, image and video model and sets them as defaults (only if no default is set yet). |
 | `ARK_BASE_URL` | optional | Defaults to BytePlus ModelArk `https://ark.ap-southeast.bytepluses.com/api/v3`. Use `https://ark.cn-beijing.volces.com/api/v3` for Volcengine (China); model defaults switch to the `doubao-*` names automatically. |
 | `TASK_EXECUTION_MODE` | optional | `inline` (default on Vercel) or `celery`. In `celery` mode on Vercel, tasks go to Vercel Queues and are consumed by the `worker:app` subscriber. That path is untested on a Services deployment. |
-| `ARK_TEXT_MODEL` / `ARK_IMAGE_MODEL` / `ARK_VIDEO_MODEL` | optional | Override the default Seed / Seedream / Seedance model IDs. They can also be changed in the UI under model management. |
+| `ARK_TEXT_MODEL` / `ARK_IMAGE_MODEL` / `ARK_VIDEO_MODEL` | optional | Override the default Seed / Seedream / Seedance model IDs. If the current default is still the auto-created model, it switches to the new one on the next cold start. Defaults you pick in the UI under model management are never overwritten. |
 
 Without a database URL the API falls back to an ephemeral SQLite file in `/tmp`
 (smoke tests only: data is lost and is not shared between the API and worker functions).
@@ -35,6 +35,11 @@ Without a database URL the API falls back to an ephemeral SQLite file in `/tmp`
 storage backend, the Celery broker scheme, the bootstrap result, and the configured
 Ark models. Add `?probe_ark=true` to make read-only calls to the Ark API
 (list models / list video tasks; these don't generate anything or cost money).
+Add `?probe_models=true` to check which candidate Seed / Seedream / Seedance models
+your account has activated. Each model gets a deliberately incomplete request:
+`available` means the model rejected the parameters (so it is enabled), and
+`unavailable` means not found / not activated. No generation is billed. The
+`/models` catalogue lists models that may not be activated on your account.
 No secrets are returned.
 
 `GET /api/v1/_deploy/selftest` dispatches a test job the same way real generation

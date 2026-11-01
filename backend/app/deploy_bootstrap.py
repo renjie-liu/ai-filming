@@ -287,7 +287,7 @@ async def seed_ark_provider(session: AsyncSession) -> bool:
 
     - 供应商 api_key / base_url 每次启动与环境变量同步（便于轮换 key）；
     - 模型按 (provider, category, name) 去重创建；
-    - 默认模型只在对应类别尚未设置时写入，不覆盖用户在 UI 中的选择。
+    - 默认模型在未设置、或仍指向本引导创建的模型时与环境变量保持一致；不覆盖用户在 UI 中选择的其他模型。
     """
     from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider, ProviderStatus
 
@@ -346,14 +346,22 @@ async def seed_ark_provider(session: AsyncSession) -> bool:
         settings_row = ModelSettings(id=1, api_timeout=120)
         session.add(settings_row)
         changed = True
-    if not settings_row.default_text_model_id:
-        settings_row.default_text_model_id = model_ids[ModelCategoryKey.text]
-        changed = True
-    if not settings_row.default_image_model_id:
-        settings_row.default_image_model_id = model_ids[ModelCategoryKey.image]
-        changed = True
-    if not settings_row.default_video_model_id:
-        settings_row.default_video_model_id = model_ids[ModelCategoryKey.video]
+    field_by_category = {
+        ModelCategoryKey.text: "default_text_model_id",
+        ModelCategoryKey.image: "default_image_model_id",
+        ModelCategoryKey.video: "default_video_model_id",
+    }
+    for category, field in field_by_category.items():
+        current_id = getattr(settings_row, field)
+        target_id = model_ids[category]
+        if current_id == target_id:
+            continue
+        if current_id:
+            # 只跟随环境变量调整「由本引导创建的」默认模型；用户在 UI 中选择的其他模型不覆盖。
+            current = await session.get(Model, current_id)
+            if current is not None and current.created_by != "deploy-bootstrap":
+                continue
+        setattr(settings_row, field, target_id)
         changed = True
     await session.flush()
     return changed

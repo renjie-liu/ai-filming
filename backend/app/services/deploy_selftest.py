@@ -62,7 +62,7 @@ def _probe_default_text_llm() -> str:
         return f"ok: {str(getattr(reply, 'content', reply))[:40]}"
     except Exception as exc:  # noqa: BLE001
         detail = getattr(exc, "detail", None) or str(exc)
-        return f"error: {type(exc).__name__}: {detail}"[:150]
+        return f"error: {type(exc).__name__}: {detail}"[:110]
 
 
 def record_selftest_sync(token: str, enqueued_at: str, llm: bool = False) -> None:

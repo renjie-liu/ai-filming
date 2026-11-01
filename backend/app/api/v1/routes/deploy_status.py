@@ -54,8 +54,89 @@ async def _probe_ark(base_url: str, api_key: str) -> dict[str, Any]:
     return out
 
 
+# 候选模型（来自方舟 /models 目录；目录 ≠ 账号已开通）。按类别逐个做「零成本可用性探测」。
+_ARK_MODEL_CANDIDATES: dict[str, list[str]] = {
+    "text": [
+        "seed-2-0-pro-260328",
+        "seed-2-0-lite-260428",
+        "seed-2-0-mini-260428",
+        "seed-1-8-251228",
+        "seed-1-6-250915",
+        "seed-1-6-flash-250715",
+        "dola-seed-2-1-turbo-260628",
+    ],
+    "image": [
+        "seedream-5-0-260128",
+        "seedream-4-5-251128",
+        "seedream-4-0-250828",
+        "dola-seedream-5-0-pro-260628",
+        "dola-seedream-5-0-flash-260915",
+    ],
+    "video": [
+        "seedance-1-5-pro-251215",
+        "seedance-1-0-pro-250528",
+        "seedance-1-0-pro-fast-251015",
+        "seedance-1-0-lite-t2v-250428",
+        "dreamina-seedance-2-0-260128",
+        "dreamina-seedance-2-0-fast-260128",
+        "dreamina-seedance-2-5-260628",
+    ],
+}
+
+
+def _classify_probe(status_code: int, body: str) -> str:
+    """把探测响应归类：available（参数校验失败 = 模型可用）/ unavailable / denied / unknown。"""
+    text_lower = body.lower()
+    if status_code == 404 or "notfound" in text_lower or "modelnotopen" in text_lower or "not activated" in text_lower:
+        return "unavailable"
+    if status_code in (401, 403):
+        return "denied"
+    if status_code in (400, 422):
+        return "available"
+    if status_code < 300:
+        return "available"
+    return "unknown"
+
+
+async def _probe_ark_models(base_url: str, api_key: str) -> dict[str, list[dict[str, Any]]]:
+    """零成本模型可用性探测：对每个候选模型发送故意缺少必填字段的请求。
+
+    - 文本：messages 为空；图片：缺少 prompt；视频：content 为空。
+    - 已开通的模型会返回参数校验错误（400），未开通返回 404 / ModelNotOpen；均不会产生生成计费。
+    """
+    import httpx
+
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    requests = {
+        "text": ("/chat/completions", lambda m: {"model": m, "messages": []}),
+        "image": ("/images/generations", lambda m: {"model": m}),
+        "video": ("/contents/generations/tasks", lambda m: {"model": m, "content": []}),
+    }
+    out: dict[str, list[dict[str, Any]]] = {}
+    async with httpx.AsyncClient(timeout=15) as client:
+        for category, models in _ARK_MODEL_CANDIDATES.items():
+            path, body_fn = requests[category]
+            rows: list[dict[str, Any]] = []
+            for model in models:
+                try:
+                    r = await client.post(f"{base_url}{path}", headers=headers, json=body_fn(model))
+                    code = ""
+                    try:
+                        code = str(((r.json() or {}).get("error") or {}).get("code") or "")
+                    except Exception:  # noqa: BLE001
+                        code = ""
+                    rows.append({"model": model, "result": _classify_probe(r.status_code, r.text), "http": r.status_code, "code": code})
+                except Exception as exc:  # noqa: BLE001
+                    rows.append({"model": model, "result": "unknown", "error": type(exc).__name__})
+            out[category] = rows
+    return out
+
+
 @router.get("/_deploy/status", response_model=ApiResponse[dict])
-async def deploy_status(probe_ark: bool = Query(False, description="是否对方舟 API 做只读连通性探测")) -> ApiResponse[dict]:
+async def deploy_status(
+    probe_ark: bool = Query(False, description="是否对方舟 API 做只读连通性探测"),
+    probe_models: bool = Query(False, description="是否对候选模型做零成本可用性探测（故意缺参请求，不产生生成）"),
+) -> ApiResponse[dict]:
     from app.core import storage
     from app.core.db import async_session_maker, engine
     from app.deploy_bootstrap import ark_seed_plan
@@ -95,6 +176,8 @@ async def deploy_status(probe_ark: bool = Query(False, description="是否对方
         ark.update({k: plan[k] for k in ("region", "base_url", "text", "image", "video")})
         if probe_ark:
             ark["probes"] = [await _probe_ark(base, plan["api_key"]) for base in _ARK_BASES.values()]
+        if probe_models:
+            ark["model_availability"] = await _probe_ark_models(plan["base_url"], plan["api_key"])
 
     broker = settings.celery_broker_url or ""
     data = {
