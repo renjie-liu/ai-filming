@@ -205,8 +205,9 @@ pnpm run openapi:update
 ## ▲ Vercel
 
 This repository can be deployed to Vercel as a single project (frontend, FastAPI API,
-Celery workers on Vercel Queues, Neon Postgres, Vercel Blob). See
-[docs/deploy-vercel.md](./docs/deploy-vercel.md).
+background jobs, Neon Postgres, Vercel Blob) with a single `SEEDDANCE_API_KEY`. See
+[docs/deploy-vercel.md](./docs/deploy-vercel.md). For a walkthrough from script to
+video, see [docs/user-guide.md](./docs/user-guide.md) or the in-app **Guide** page.
 
 ## 🐳 Docker Compose
 

@@ -9,6 +9,7 @@ import { request as __request } from '../core/request';
 export class DeployService {
     /**
      * Deploy Status
+     * 返回数据库、存储、任务执行方式与方舟接入状态（不含任何密钥）。
      * @returns ApiResponse_dict_ Successful Response
      * @throws ApiError
      */
@@ -66,7 +67,7 @@ export class DeployService {
     }
     /**
      * Deploy Selftest Result
-     * 查询自检结果：`done=false` 表示 worker 尚未执行（或队列未投递）。
+     * 查询自检结果：`done=false` 表示任务尚未执行完成。
      * @returns ApiResponse_dict_ Successful Response
      * @throws ApiError
      */

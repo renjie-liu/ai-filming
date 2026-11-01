@@ -15,19 +15,45 @@ This fork runs the whole stack in a single Vercel project using
 Routing is defined in `/vercel.json`: `/api/*`, `/docs`, `/openapi.json` go to the
 API service; everything else goes to the SPA.
 
-## Environment variables
+## Setup: one API key
 
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `DATABASE_URL` or `POSTGRES_URL` | yes | Injected automatically when a Neon database is connected to the project. `postgres://…` URLs are normalized to `postgresql+psycopg://…`. |
-| `BLOB_READ_WRITE_TOKEN` | yes | Injected automatically when a Blob store is connected. |
-| `SEEDDANCE_API_KEY` (or `ARK_API_KEY`) | recommended | Ark / BytePlus ModelArk API key. On startup the app creates provider `ark-seedance` with a text, image and video model and sets them as defaults (only if no default is set yet). |
-| `ARK_BASE_URL` | optional | Defaults to BytePlus ModelArk `https://ark.ap-southeast.bytepluses.com/api/v3`. Use `https://ark.cn-beijing.volces.com/api/v3` for Volcengine (China); model defaults switch to the `doubao-*` names automatically. |
-| `TASK_EXECUTION_MODE` | optional | `inline` (default on Vercel) or `celery`. In `celery` mode on Vercel, tasks go to Vercel Queues and are consumed by the `worker:app` subscriber. That path is untested on a Services deployment. |
-| `ARK_TEXT_MODEL` / `ARK_IMAGE_MODEL` / `ARK_VIDEO_MODEL` | optional | Override the default Seed / Seedream / Seedance model IDs. If the current default is still the auto-created model, it switches to the new one on the next cold start. Defaults you pick in the UI under model management are never overwritten. |
+Connect a Neon database and a Blob store to the project (both from the project's
+**Storage** tab), then add **one** environment variable:
+
+| Variable | Notes |
+| --- | --- |
+| `SEEDDANCE_API_KEY` | Your Seedance / ModelArk API key. `SEEDANCE_API_KEY`, `ARK_API_KEY`, `MODELARK_API_KEY`, `BYTEPLUS_API_KEY` and `VOLCENGINE_API_KEY` also work. |
+
+Nothing else is needed. On the first start (and whenever the key changes) the app:
+
+1. works out which region the key belongs to (BytePlus ModelArk or Volcengine Ark)
+   with a read-only call;
+2. picks the first text, image and video model **enabled on your account**. Each
+   candidate model gets a deliberately incomplete request, so nothing is generated
+   or billed;
+3. creates the provider and models and sets them as defaults, then caches the result
+   in the database so later starts don't call Ark again.
+
+Users never enter an API key in the app. Model Management shows the provider as
+"Managed by deployment".
+
+`DATABASE_URL` / `POSTGRES_URL` and `BLOB_READ_WRITE_TOKEN` are injected automatically
+when the Neon database and Blob store are connected.
+
+<details>
+<summary>Optional overrides</summary>
+
+| Variable | Notes |
+| --- | --- |
+| `ARK_BASE_URL` | Force a region endpoint instead of auto-detecting it. |
+| `ARK_TEXT_MODEL` / `ARK_IMAGE_MODEL` / `ARK_VIDEO_MODEL` | Force specific model IDs. If the current default is still the auto-created model, it switches on the next cold start. Defaults picked in the UI are never overwritten. |
+| `TASK_EXECUTION_MODE` | `inline` (default on Vercel) or `celery`. In `celery` mode on Vercel, tasks go to Vercel Queues and are consumed by the `worker:app` subscriber. That path is untested on a Services deployment. |
+| `BLOB_ACCESS` | `public` (default) or `private`. |
+
+</details>
 
 Without a database URL the API falls back to an ephemeral SQLite file in `/tmp`
-(smoke tests only: data is lost and is not shared between the API and worker functions).
+(smoke tests only: data is lost and is not shared between instances).
 
 ## Health check
 

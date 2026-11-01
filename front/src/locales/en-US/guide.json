@@ -1,0 +1,95 @@
+{
+  "menu": "Guide",
+  "pageTitle": "Guide: from script to video",
+  "pageIntro": "Jellyfish splits a script into shots, lets you confirm characters, scenes and props, then makes keyframes with Seedream and video clips with Seedance. Follow the 6 steps below to make your first clip. Button labels in the app are in Chinese; this guide quotes each one in 「」 next to its English meaning.",
+  "quickStart": {
+    "title": "Quick start",
+    "subtitle": "6 steps to your first AI short-drama clip",
+    "openGuide": "Open the full guide",
+    "dismiss": "Don't show again",
+    "createProject": "New project",
+    "continue": "Open latest project"
+  },
+  "setup": {
+    "readyTitle": "AI models are ready. No API key needed",
+    "readyDesc": "{{provider}} is connected by the deployment. Default models: text {{text}} · image {{image}} · video {{video}}. To change them, pick another model under 「模型管理 → 设置」 (Models → Settings).",
+    "readyDescGeneric": "Default models: text {{text}} · image {{image}} · video {{video}}.",
+    "managedTag": "Managed by deployment",
+    "managedHint": "This provider's API key comes from the deployment's environment variables and syncs on every start. Changing the key here has no effect.",
+    "notReadyTitle": "No usable default model for: {{missing}}",
+    "notReadyDesc": "Set SEEDDANCE_API_KEY in the deployment's environment variables and redeploy to configure it automatically, or add a provider and models under 「模型管理」 (Models).",
+    "goModels": "Go to Models",
+    "loading": "Checking AI model setup…",
+    "categories": { "text": "text", "image": "image", "video": "video" }
+  },
+  "steps": {
+    "project": {
+      "title": "Create a project",
+      "summary": "Pick a visual style and aspect ratio",
+      "details": [
+        "On the project list, click 「新建项目」 (New project) at the top right.",
+        "Enter 「项目名称」 (Project name) and choose 「视觉风格」 (Visual style: live-action / anime) and 「视频风格」 (Video style).",
+        "Set 「默认视频比例」 (Default aspect ratio), e.g. 9:16 for vertical, too. Otherwise video generation will ask for it later.",
+        "Click 「创建并进入」 (Create and open) to open the project workbench."
+      ]
+    },
+    "chapter": {
+      "title": "Paste your script",
+      "summary": "Add a chapter and paste the text",
+      "details": [
+        "In the project workbench, open the 「章节」 (Chapters) tab and click 「创建第一章」 (Create first chapter) or 「新建章节」 (New chapter).",
+        "Enter 「章节标题」 (Chapter title), paste your script into 「章节内容（可粘贴剧本）」 (Chapter content), then click 「创建」 (Create).",
+        "When 「章节创建成功」 (Chapter created) appears, click 「立即提取分镜」 (Extract shots now)."
+      ]
+    },
+    "extract": {
+      "title": "Split into shots",
+      "summary": "Let the AI break the script into shots",
+      "details": [
+        "Click 「提取分镜」 (Extract shots) on the chapter row, or 「一键提取分镜」 (Extract shots) on the shots page.",
+        "The text model splits the script into shots, usually in 1–2 minutes. Follow progress in 「任务中心」 (Task center), the floating button at the bottom left. You can leave the page while it runs.",
+        "When it finishes, the shot list shows each shot's title and script excerpt."
+      ]
+    },
+    "prepare": {
+      "title": "Confirm each shot",
+      "summary": "Confirm assets and dialogue on the shot editor",
+      "details": [
+        "In the shot list, click 「编辑」 (Edit) on a shot to open 「分镜准备」 (Shot preparation).",
+        "Open 「2 提取确认」 (Extraction review) and click 「提取并刷新候选」 (Extract candidates). The AI finds characters, scenes, props and dialogue.",
+        "For each asset candidate, click 「关联」 (Link) or 「新建」 (Create), or 「忽略」 (Ignore) if you don't need it. For dialogue, 「全部接受」 (Accept all). For a shot with nothing to extract, click 「无需提取」 (No extraction needed).",
+        "When the right panel shows 「准备完成」 (Ready), the shot is ready. Use 「继续处理下一个待处理镜头」 (Next pending shot) to work through the rest."
+      ]
+    },
+    "keyframe": {
+      "title": "Make keyframes",
+      "summary": "Generate images with Seedream in the studio",
+      "details": [
+        "Click 「进入工作室」 / 「进入分镜工作室」 (Open studio). In the right-hand 「分镜生成面板」 (Generation panel), open 「关键帧与参考图」 (Keyframes & references).",
+        "On the 「首帧图片」 (First frame) card click 「生成」 (Generate). In the prompt preview you can click 「AI生成」 (AI draft) to write the prompt, then click 「生成」 (Generate).",
+        "Images take about 10–30 seconds and become the first-frame reference for the video."
+      ]
+    },
+    "video": {
+      "title": "Generate the video",
+      "summary": "Check readiness, then render with Seedance",
+      "details": [
+        "Open the 「视频生成」 (Video) tab and check that 「视频准备度」 (Video readiness) shows 「可生成」 (Ready). If it shows 「待补齐」 (Incomplete), fill in what it lists.",
+        "Click 「生成视频」 (Generate video), review the prompt, then click 「生成」 (Generate). Seedance usually takes 1–3 minutes, and the clip appears under 「已生成视频」 (Generated videos).",
+        "To do several shots at once, select them on the left and use 「批量生成」 (Batch generate). Shots that aren't ready are skipped automatically.",
+        "When you're done, click 「进入后期剪辑」 (Open editor) in the project workbench to cut the clips together."
+      ]
+    }
+  },
+  "tips": {
+    "title": "Tips",
+    "items": [
+      "Every long-running job (shot splitting, images, videos) appears in 「任务中心」 (Task center) at the bottom left, where you can follow or cancel it.",
+      "Images and videos use your Seedance credits, and video is the expensive part. Try a single shot before batch-generating.",
+      "On this deployment, each generation job must finish within 5 minutes. A job that times out stays shown as running; just generate it again.",
+      "Button labels in the app are in Chinese. This guide quotes them in 「」 so you can find them on screen."
+    ]
+  },
+  "flowTitle": "How the workflow is split",
+  "flowRule": "The shot editor is for preparation (extracting and confirming); the studio is for generation (keyframes, video). If a shot isn't ready, the studio sends you back to the editor."
+}

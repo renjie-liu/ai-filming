@@ -26,7 +26,8 @@ import {
   UnorderedListOutlined,
   BarsOutlined,
 } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import QuickStartCard from '../guide/QuickStartCard'
 import { chapters as mockChapters, projects as mockProjects, type Project } from '../../../mocks/data'
 import { StudioChaptersService, StudioProjectsService } from '../../../services/generated'
 import type { ChapterRead, ProjectRead, ProjectStyle } from '../../../services/generated'
@@ -148,6 +149,17 @@ const ProjectLobby: React.FC = () => {
   useEffect(() => {
     void load()
   }, [])
+
+  // 支持 /projects?create=1 直接打开「新建项目」弹窗（使用指南页的入口按钮使用）。
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    if (searchParams.get('create') !== '1') return
+    handleOpenCreate()
+    const next = new URLSearchParams(searchParams)
+    next.delete('create')
+    setSearchParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   const getProjectStatus = (p: ProjectView): 'draft' | 'inProgress' | 'completed' => {
     if (p.progress >= 90) return 'completed'
@@ -868,6 +880,7 @@ const ProjectLobby: React.FC = () => {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
+      {!loading && !search && <QuickStartCard projectCount={projects.length} onCreateProject={handleOpenCreate} />}
       <Row gutter={12}>
         <Col xs={24} lg={18}>
           <Row gutter={viewMode === 'compact' ? [8, 8] : viewMode === 'large' ? [14, 14] : [12, 12]}>

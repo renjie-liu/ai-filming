@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import { Layout, Menu, theme, Dropdown, Space, Avatar, Select, Breadcrumb } from 'antd'
 import {
   MenuFoldOutlined,
@@ -9,6 +9,7 @@ import {
   PictureOutlined,
   FileTextOutlined,
   ApiOutlined,
+  CompassOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
@@ -30,6 +31,14 @@ const MainLayout: React.FC = () => {
   const language = useAppStore((state) => state.language)
   const setLanguage = useAppStore((state) => state.setLanguage)
 
+  // 让语言下拉框与 i18n 实际生效的语言保持一致（i18n 会按 localStorage / 浏览器语言自动检测，
+  // 而 store 初始值固定为 zh-CN，否则会出现界面是英文、下拉框却显示「简体中文」的情况）。
+  useEffect(() => {
+    const resolved = (i18n.resolvedLanguage || i18n.language) === 'en-US' ? 'en-US' : 'zh-CN'
+    if (resolved !== language) setLanguage(resolved)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [i18n.resolvedLanguage])
+
   const selectedKeys = useMemo(() => {
     if (location.pathname === '/projects' || location.pathname.startsWith('/projects/')) return ['projects']
     if (location.pathname.startsWith('/assets')) return ['assets']
@@ -37,6 +46,7 @@ const MainLayout: React.FC = () => {
     if (location.pathname.startsWith('/files')) return ['files']
     if (location.pathname.startsWith('/agents')) return ['agents']
     if (location.pathname.startsWith('/models')) return ['models']
+    if (location.pathname.startsWith('/guide')) return ['guide']
     if (location.pathname.startsWith('/settings')) return ['settings']
     return []
   }, [location.pathname])
@@ -52,6 +62,7 @@ const MainLayout: React.FC = () => {
       files: '文件管理',
       agents: 'Agent管理',
       models: '模型管理',
+      guide: t('menu.guide'),
       settings: t('menu.settings'),
       chapters: '章节管理',
       studio: '分镜工作室',
@@ -119,6 +130,11 @@ const MainLayout: React.FC = () => {
       key: 'models',
       icon: <ApiOutlined />,
       label: <Link to="/models">模型管理</Link>,
+    },
+    {
+      key: 'guide',
+      icon: <CompassOutlined />,
+      label: <Link to="/guide">{t('menu.guide')}</Link>,
     },
     {
       key: 'settings',

@@ -5,8 +5,8 @@
 - Vercel Functions 没有这类一次性步骤，这里在应用启动时幂等地完成同样的工作：
   1. 建表（Base.metadata.create_all），通过表结构指纹跳过重复执行；
   2. 写入 `sql/001-init-prompt-template.sql` 中的系统提示词模板（解析 MySQL INSERT，按 ORM 写入，方言无关）；
-  3. 若配置了火山方舟 / BytePlus ModelArk API Key（SEEDDANCE_API_KEY / ARK_API_KEY），
-     自动创建供应商、文本/图片/视频模型，并在未设置时写入默认模型。
+  3. 若部署环境提供了方舟 API Key（SEEDDANCE_API_KEY 等，见 config.ark_api_key），
+     自动探测区域与已开通模型（见 app.services.ark_autoconfig），创建供应商、文本/图片/视频模型与默认模型。
 
 所有步骤均可重复执行；Postgres 下使用 advisory lock 防止多个冷启动实例并发建表。
 """
@@ -33,25 +33,6 @@ _META_TABLE_NAME = "jellyfish_bootstrap_meta"
 _PROMPT_SEED_FILE = BACKEND_ROOT / "sql" / "001-init-prompt-template.sql"
 
 ARK_PROVIDER_ID = "ark-seedance"
-
-# 默认模型（BytePlus ModelArk 国际站 / 火山方舟国内站命名不同，后者带 `doubao-` 前缀）。
-# 均可通过 ARK_TEXT_MODEL / ARK_IMAGE_MODEL / ARK_VIDEO_MODEL 覆盖，或在「模型管理」页面修改。
-_ARK_REGION_DEFAULTS: dict[str, dict[str, str]] = {
-    "byteplus": {
-        "base_url": "https://ark.ap-southeast.bytepluses.com/api/v3",
-        # seed-1-6-* 在新账号上通常未开通（InvalidEndpointOrModel.NotFound），默认改用 Seed 2.0 Lite。
-        "text": "seed-2-0-lite-260428",
-        "image": "seedream-4-0-250828",
-        "video": "seedance-1-0-pro-250528",
-    },
-    "volcengine": {
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "text": "doubao-seed-1-6-250615",
-        "image": "doubao-seedream-4-0-250828",
-        "video": "doubao-seedance-1-0-pro-250528",
-    },
-}
-
 
 def _import_all_models() -> None:
     import app.models.llm  # noqa: F401  # pylint: disable=unused-import
@@ -259,30 +240,6 @@ async def seed_prompt_templates(session: AsyncSession) -> int:
 # ---------------------------------------------------------------------------
 
 
-def resolve_ark_region(base_url: str | None) -> str:
-    value = (base_url or "").lower()
-    if "volces.com" in value or "volcengine" in value:
-        return "volcengine"
-    return "byteplus"
-
-
-def ark_seed_plan() -> dict[str, str] | None:
-    """根据环境变量计算方舟供应商与模型配置；未配置 key 时返回 None。"""
-    api_key = (settings.ark_api_key or "").strip()
-    if not api_key:
-        return None
-    region = resolve_ark_region(settings.ark_base_url)
-    defaults = _ARK_REGION_DEFAULTS[region]
-    return {
-        "api_key": api_key,
-        "region": region,
-        "base_url": (settings.ark_base_url or "").strip() or defaults["base_url"],
-        "text": (settings.ark_text_model or "").strip() or defaults["text"],
-        "image": (settings.ark_image_model or "").strip() or defaults["image"],
-        "video": (settings.ark_video_model or "").strip() or defaults["video"],
-    }
-
-
 async def seed_ark_provider(session: AsyncSession) -> bool:
     """幂等创建 / 同步方舟供应商与默认模型；返回是否有写入。
 
@@ -291,8 +248,9 @@ async def seed_ark_provider(session: AsyncSession) -> bool:
     - 默认模型在未设置、或仍指向本引导创建的模型时与环境变量保持一致；不覆盖用户在 UI 中选择的其他模型。
     """
     from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider, ProviderStatus
+    from app.services.ark_autoconfig import ARK_REGION_LABELS, resolve_ark_plan
 
-    plan = ark_seed_plan()
+    plan = await resolve_ark_plan(session)
     if plan is None:
         return False
 
@@ -305,7 +263,7 @@ async def seed_ark_provider(session: AsyncSession) -> bool:
             base_url=plan["base_url"],
             api_key=plan["api_key"],
             api_secret="",
-            description="Seedance / Seedream / Seed via Ark (auto-configured from SEEDDANCE_API_KEY)",
+            description=f"Seedance / Seedream / Seed via {ARK_REGION_LABELS.get(plan['region'], 'Ark')} (auto-configured from deployment API key)",
             status=ProviderStatus.active,
             created_by="deploy-bootstrap",
         )

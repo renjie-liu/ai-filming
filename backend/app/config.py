@@ -41,6 +41,25 @@ def normalize_database_url(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
+_ARK_API_KEY_ENV_NAMES = (
+    "ARK_API_KEY",
+    "SEEDDANCE_API_KEY",
+    "SEEDANCE_API_KEY",
+    "MODELARK_API_KEY",
+    "BYTEPLUS_API_KEY",
+    "VOLCENGINE_API_KEY",
+)
+
+
+def _first_env(names: tuple[str, ...]) -> str | None:
+    """返回第一个非空环境变量值；用于兼容同一配置的多种常见命名。"""
+    for name in names:
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value
+    return None
+
+
 def _default_database_url() -> str:
     """数据库 URL 解析顺序：DATABASE_URL > POSTGRES_URL（Vercel/Neon）> 本地 SQLite。"""
     for key in ("DATABASE_URL", "POSTGRES_URL"):
@@ -125,9 +144,8 @@ class Settings(BaseSettings):
 
     # 火山方舟 / BytePlus ModelArk（Seedance 视频、Seedream 图片、Seed 文本）
     # 若设置了 key，启动时自动创建供应商、模型与默认模型设置（幂等）。
-    ark_api_key: str | None = Field(
-        default_factory=lambda: (os.environ.get("ARK_API_KEY") or os.environ.get("SEEDDANCE_API_KEY") or "").strip() or None
-    )
+    # 任取其一即可（大小写不敏感）；SEEDDANCE（双 D）与 SEEDANCE 两种拼写都支持。
+    ark_api_key: str | None = Field(default_factory=lambda: _first_env(_ARK_API_KEY_ENV_NAMES))
     ark_base_url: str | None = None
     ark_text_model: str | None = None
     ark_image_model: str | None = None

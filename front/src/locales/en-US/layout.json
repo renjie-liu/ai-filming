@@ -3,7 +3,8 @@
   "subtitle": "AI Short-form Studio",
   "welcome": "Welcome to Jellyfish",
   "menu": {
-    "settings": "Settings"
+    "settings": "Settings",
+    "guide": "Guide"
   },
   "user": {
     "profile": "Profile",
@@ -14,4 +15,3 @@
     "en": "English"
   }
 }
-

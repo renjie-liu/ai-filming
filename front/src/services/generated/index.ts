@@ -60,6 +60,7 @@ export type { ApiResponse_ScriptConsistencyCheckResult_ } from './models/ApiResp
 export type { ApiResponse_ScriptDivisionResult_ } from './models/ApiResponse_ScriptDivisionResult_';
 export type { ApiResponse_ScriptOptimizationResult_ } from './models/ApiResponse_ScriptOptimizationResult_';
 export type { ApiResponse_ScriptSimplificationResult_ } from './models/ApiResponse_ScriptSimplificationResult_';
+export type { ApiResponse_SetupStatusRead_ } from './models/ApiResponse_SetupStatusRead_';
 export type { ApiResponse_ShotAssetsOverviewRead_ } from './models/ApiResponse_ShotAssetsOverviewRead_';
 export type { ApiResponse_ShotCharacterLinkRead_ } from './models/ApiResponse_ShotCharacterLinkRead_';
 export type { ApiResponse_ShotDetailRead_ } from './models/ApiResponse_ShotDetailRead_';
@@ -176,6 +177,9 @@ export type { ScriptOptimizationResult } from './models/ScriptOptimizationResult
 export type { ScriptOptimizeRequest } from './models/ScriptOptimizeRequest';
 export type { ScriptSimplificationResult } from './models/ScriptSimplificationResult';
 export type { ScriptSimplifyRequest } from './models/ScriptSimplifyRequest';
+export type { SetupModelRead } from './models/SetupModelRead';
+export type { SetupProviderRead } from './models/SetupProviderRead';
+export type { SetupStatusRead } from './models/SetupStatusRead';
 export type { ShotAssetOverviewItem } from './models/ShotAssetOverviewItem';
 export type { ShotAssetsOverviewRead } from './models/ShotAssetsOverviewRead';
 export type { ShotAssetsOverviewSummary } from './models/ShotAssetsOverviewSummary';
@@ -266,3 +270,4 @@ export { StudioShotDialogLinesService } from './services/StudioShotDialogLinesSe
 export { StudioShotFrameImagesService } from './services/StudioShotFrameImagesService';
 export { StudioShotLinksService } from './services/StudioShotLinksService';
 export { StudioShotsService } from './services/StudioShotsService';
+export { SystemService } from './services/SystemService';

@@ -3,9 +3,12 @@ import { Layout, Tabs } from 'antd'
 import ProvidersTab from './ProvidersTab'
 import ModelsTab from './ModelsTab'
 import SettingsTab from './SettingsTab'
+import SetupStatusBanner from '../guide/SetupStatusBanner'
+import { useSetupStatus } from '../guide/useSetupStatus'
 
 export default function ModelManagement() {
   const [activeTab, setActiveTab] = useState<string>('providers')
+  const { loading: setupLoading, status: setupStatus } = useSetupStatus()
 
   return (
     <Layout className="h-full flex flex-col" style={{ minHeight: 0 }}>
@@ -13,6 +16,7 @@ export default function ModelManagement() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="font-semibold text-gray-800">模型管理</span>
         </div>
+        <SetupStatusBanner status={setupStatus} loading={setupLoading} showManagedHint />
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}

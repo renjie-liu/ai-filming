@@ -3,7 +3,8 @@
   "subtitle": "AI 短剧工作台",
   "welcome": "欢迎使用 Jellyfish",
   "menu": {
-    "settings": "系统设置"
+    "settings": "系统设置",
+    "guide": "使用指南"
   },
   "user": {
     "profile": "个人中心",
@@ -14,4 +15,3 @@
     "en": "English"
   }
 }
-
