@@ -1,5 +1,6 @@
 """SQLAlchemy 异步引擎与会话。"""
 
+import threading
 from typing import Any
 
 from sqlalchemy.ext.asyncio import (
@@ -50,12 +51,19 @@ def _build_session_maker(bind_engine: AsyncEngine) -> async_sessionmaker[AsyncSe
     )
 
 
+# 线程级 async DB runtime（engine + sessionmaker）覆盖。
+# 进程内后台线程执行任务（Vercel inline 模式）时使用，避免替换 / 释放 API 主事件循环正在使用的全局 engine。
+_thread_runtime = threading.local()
+
+
 class _AsyncSessionMakerProxy:
     """可重绑定的 sessionmaker 代理。
 
     Celery prefork 模式下，worker 子进程不能继续复用父进程里初始化的
     async engine / sessionmaker。这里保持导入对象稳定，同时允许在子进程
     启动后重新绑定底层 sessionmaker。
+
+    若当前线程通过 `reset_db_runtime()` 建立了线程级 runtime，则优先使用线程级 sessionmaker。
     """
 
     def __init__(self, maker: async_sessionmaker[AsyncSession]) -> None:
@@ -65,7 +73,8 @@ class _AsyncSessionMakerProxy:
         self._maker = maker
 
     def __call__(self, *args: Any, **kwargs: Any) -> AsyncSession:
-        return self._maker(*args, **kwargs)
+        maker = getattr(_thread_runtime, "maker", None) or self._maker
+        return maker(*args, **kwargs)
 
 
 engine = _build_engine()
@@ -92,17 +101,32 @@ async def init_db() -> None:
 
 async def close_db() -> None:
     """关闭数据库连接。"""
+    local_engine = getattr(_thread_runtime, "engine", None)
+    if local_engine is not None:
+        # 仅释放当前线程自己的 runtime，不影响主线程（API 事件循环）的全局 engine。
+        _thread_runtime.engine = None
+        _thread_runtime.maker = None
+        await local_engine.dispose()
+        return
     await engine.dispose()
 
 
 def reset_db_runtime() -> None:
-    """在 Celery worker 子进程中重建 engine 与 sessionmaker。
+    """为即将在新事件循环中执行的任务重建 async engine 与 sessionmaker。
 
-    这样可以避免 prefork 继承父进程中的 async engine，导致连接对象和事件循环
-    绑定错乱，触发 Future attached to a different loop。
+    - 主线程（Celery prefork 子进程）：替换全局 engine，避免继承父进程中的 engine，
+      导致连接对象和事件循环绑定错乱，触发 Future attached to a different loop；
+    - 非主线程（API 进程内后台线程执行任务）：只建立线程级 runtime，
+      主事件循环继续使用原全局 engine，互不干扰。
     """
 
     global engine
+
+    if threading.current_thread() is not threading.main_thread():
+        local_engine = _build_engine()
+        _thread_runtime.engine = local_engine
+        _thread_runtime.maker = _build_session_maker(local_engine)
+        return
 
     engine = _build_engine()
     async_session_maker.configure(_build_session_maker(engine))

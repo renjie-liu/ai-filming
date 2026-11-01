@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Coroutine
+import threading
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 from app.config import is_vercel_runtime
@@ -35,3 +36,18 @@ def spawn_background(coro: Coroutine[Any, Any, Any]) -> None:
         wait_until(task)
     except Exception:  # noqa: BLE001 - 无请求上下文或 SDK 不可用时退化为普通后台任务
         logger.warning("wait_until unavailable; background task may be cut short", exc_info=True)
+
+
+def run_sync_in_background(fn: Callable[..., Any], *args: Any) -> None:
+    """在后台线程执行同步函数（如任务执行器的 `run(task_id)`）。
+
+    - 有运行中的事件循环（API 请求内）：`asyncio.to_thread` + `spawn_background`，
+      在 Vercel 上会注册 wait_until，响应返回后函数继续执行直到任务结束；
+    - 无事件循环（脚本 / 同步上下文）：直接起守护线程。
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        threading.Thread(target=fn, args=args, daemon=True, name="jellyfish-inline-task").start()
+        return
+    spawn_background(asyncio.to_thread(fn, *args))

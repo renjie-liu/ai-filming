@@ -99,6 +99,7 @@ async def deploy_status(probe_ark: bool = Query(False, description="是否对方
     broker = settings.celery_broker_url or ""
     data = {
         "vercel": is_vercel_runtime(),
+        "task_execution_mode": settings.task_execution_mode,
         "bootstrap": bootstrap_state(),
         "database": db_info,
         "storage_backend": storage.storage_backend(),
@@ -109,14 +110,16 @@ async def deploy_status(probe_ark: bool = Query(False, description="是否对方
 
 
 @router.get("/_deploy/selftest", response_model=ApiResponse[dict])
-async def deploy_selftest_start() -> ApiResponse[dict]:
-    """投递一个无费用的自检任务，验证 Celery broker → worker → 数据库链路；返回 token。
+async def deploy_selftest_start(
+    llm: bool = Query(False, description="是否在任务中调用默认文本模型（一句极短请求，成本极低）"),
+) -> ApiResponse[dict]:
+    """按业务任务相同的执行方式分派自检任务，验证「分派 → 执行 → 数据库」链路；返回 token。
 
-    使用 GET 便于在浏览器中直接打开（接口受部署保护，且不调用任何模型供应商）。
+    使用 GET 便于在浏览器中直接打开（接口受部署保护；默认不调用任何模型供应商）。
     """
     from app.services.deploy_selftest import enqueue_selftest
 
-    return success_response(data=enqueue_selftest())
+    return success_response(data=enqueue_selftest(llm=llm))
 
 
 @router.get("/_deploy/selftest/{token}", response_model=ApiResponse[dict])

@@ -30,7 +30,20 @@ def _record_executor_dispatch(task_id: str, *, executor_type: str, executor_task
         db.commit()
 
 
-def enqueue_task_execution(task_id: str) -> AsyncResult:
+def enqueue_task_execution(task_id: str) -> AsyncResult | None:
+    """按配置的执行方式分派任务：inline（进程内后台线程）或 celery（投递到 broker）。
+
+    调用前任务行必须已提交，执行器会用新 session 读取它。
+    """
+    from app.config import settings
+
+    if (settings.task_execution_mode or "").strip().lower() == "inline":
+        from app.core.background import run_sync_in_background
+
+        _record_executor_dispatch(task_id, executor_type="inline", executor_task_id=None)
+        run_sync_in_background(run_task_by_id, task_id)
+        return None
+
     async_result = run_task_celery.delay(task_id)
     _record_executor_dispatch(
         task_id,
@@ -61,6 +74,12 @@ def revoke_task_execution(task_id: str, *, terminate: bool = True, signal: str =
 
 @celery_app.task(name="task.execute")
 def run_task_celery(task_id: str) -> None:
+    """Celery 入口：委托给 run_task_by_id。"""
+    run_task_by_id(task_id)
+
+
+def run_task_by_id(task_id: str) -> None:
+    """按 GenerationTask.task_kind 解析执行器并同步执行（Celery worker 与 inline 模式共用）。"""
     with sync_session_maker() as db:
         row = db.get(GenerationTask, task_id)
         if row is None:

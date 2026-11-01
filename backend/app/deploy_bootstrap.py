@@ -365,6 +365,9 @@ async def run_deploy_bootstrap() -> dict[str, Any]:
 
     created = await ensure_schema()
     async with async_session_maker() as session:
+        if session.bind.dialect.name == "postgresql":
+            # 与建表相同的事务级 advisory lock：并发冷启动实例串行写入种子数据，避免主键冲突。
+            await session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _ADVISORY_LOCK_KEY})
         added_templates = await seed_prompt_templates(session)
         ark_changed = await seed_ark_provider(session)
         await session.commit()

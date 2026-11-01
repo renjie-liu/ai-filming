@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     # 启动时自动建表 + 写入系统提示词模板（Vercel 等无 init 容器的环境默认开启）
     auto_init_db: bool = Field(default_factory=is_vercel_runtime)
 
+    # 生成任务执行方式：
+    # - celery：投递到 Celery broker，由独立 worker 消费（本地 / Docker 默认）；
+    # - inline：在 API 进程内后台线程执行（Vercel 默认，借助 wait_until 保持函数存活，受函数 maxDuration 限制）。
+    task_execution_mode: str = Field(default_factory=lambda: "inline" if is_vercel_runtime() else "celery")
+
     # Redis / Celery Broker
     redis_host: str = "localhost"
     redis_port: int = 6379

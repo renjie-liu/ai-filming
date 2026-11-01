@@ -33,16 +33,29 @@ export class DeployService {
     }
     /**
      * Deploy Selftest Start
-     * 投递一个无费用的自检任务，验证 Celery broker → worker → 数据库链路；返回 token。
+     * 按业务任务相同的执行方式分派自检任务，验证「分派 → 执行 → 数据库」链路；返回 token。
      *
-     * 使用 GET 便于在浏览器中直接打开（接口受部署保护，且不调用任何模型供应商）。
+     * 使用 GET 便于在浏览器中直接打开（接口受部署保护；默认不调用任何模型供应商）。
      * @returns ApiResponse_dict_ Successful Response
      * @throws ApiError
      */
-    public static deploySelftestStartApiV1DeploySelftestGet(): CancelablePromise<ApiResponse_dict_> {
+    public static deploySelftestStartApiV1DeploySelftestGet({
+        llm = false,
+    }: {
+        /**
+         * 是否在任务中调用默认文本模型（一句极短请求，成本极低）
+         */
+        llm?: boolean,
+    }): CancelablePromise<ApiResponse_dict_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/_deploy/selftest',
+            query: {
+                'llm': llm,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
         });
     }
     /**
