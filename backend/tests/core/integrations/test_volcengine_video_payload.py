@@ -50,3 +50,18 @@ def test_v1_payload_unchanged() -> None:
     assert body["ratio"] == "16:9"
     assert body["duration"] == 3
     assert _roles(body) == ["first_frame"]
+
+
+def test_ark_error_keeps_provider_code_and_message() -> None:
+    import httpx
+    import pytest
+
+    from app.core.integrations.volcengine.errors import ArkApiError, raise_for_ark_status
+
+    ok = httpx.Response(200, json={"id": "x"})
+    raise_for_ark_status(ok)  # no exception
+    resp = httpx.Response(403, json={"error": {"code": "AccountOverdueError", "message": "account has an overdue balance"}})
+    with pytest.raises(ArkApiError) as exc:
+        raise_for_ark_status(resp)
+    assert "AccountOverdueError" in str(exc.value)
+    assert "overdue balance" in str(exc.value)

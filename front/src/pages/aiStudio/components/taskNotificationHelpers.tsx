@@ -3,6 +3,8 @@ import { Button, Space, notification } from 'antd'
 import type { ReactNode } from 'react'
 import type { RelationTaskState } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { useTaskUiStore } from './taskUiStore'
+import { FilmService } from '../../../services/generated'
+import { localizeErrorMessage } from '../../../utils/errorMessage'
 
 const SETTLED_TASK_RETAIN_MS = 8000
 
@@ -187,19 +189,31 @@ export function useRelationTaskNotification({
       delete settledRemoveTimersRef.current[settledTask.taskId]
     }, SETTLED_TASK_RETAIN_MS)
 
-    notification.open({
-      key: `${settledTask.taskId}:settled`,
-      message: statusMeta.message,
-      description: (
-        <div className="space-y-1">
-          <div>{statusMeta.description}</div>
-          {details.length > 0 ? <div className="text-xs opacity-80">{details.join(' · ')}</div> : null}
-        </div>
-      ),
-      duration: statusMeta.duration,
-      placement: 'topRight',
-      btn: onNavigate ? <Button size="small" onClick={onNavigate}>查看</Button> : undefined,
-    })
+    const openSettledNotification = (description: string) =>
+      notification.open({
+        key: `${settledTask.taskId}:settled`,
+        message: statusMeta.message,
+        description: (
+          <div className="space-y-1">
+            <div>{description}</div>
+            {details.length > 0 ? <div className="text-xs opacity-80">{details.join(' · ')}</div> : null}
+          </div>
+        ),
+        duration: statusMeta.duration,
+        placement: 'topRight',
+        btn: onNavigate ? <Button size="small" onClick={onNavigate}>查看</Button> : undefined,
+      })
+    openSettledNotification(statusMeta.description)
+
+    // 失败时补充真实原因（如 Seedance 余额不足、模型未开通、内容审核未通过），转换为中文后更新同一条通知。
+    if (settledTask.status === 'failed') {
+      void FilmService.getTaskResultApiV1FilmTasksTaskIdResultGet({ taskId: settledTask.taskId })
+        .then((res) => {
+          const reason = localizeErrorMessage(res.data?.error ?? null, '')
+          if (reason) openSettledNotification(`${statusMeta.description}原因：${reason}`)
+        })
+        .catch(() => undefined)
+    }
   }, [cancelledDescription, failedDescription, onNavigate, removeTask, settledTask, sourceLabel, successDescription, title, upsertTask])
 
   useEffect(() => {

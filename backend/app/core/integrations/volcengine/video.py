@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.integrations.volcengine.errors import raise_for_ark_status
 from app.core.integrations.volcengine.video_payload import build_create_task_body
 from app.core.contracts.provider import ProviderConfig
 from app.core.contracts.video_generation import VideoGenerationInput
@@ -33,7 +34,7 @@ class VolcengineVideoApiAdapter:
 
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             r = await client.post(f"{base_url}/contents/generations/tasks", headers=headers, json=body)
-            r.raise_for_status()
+            raise_for_ark_status(r)
             data: dict[str, Any] = r.json()
             task_id = str(data.get("id") or data.get("task_id") or "")
             if not task_id:
@@ -60,5 +61,5 @@ class VolcengineVideoApiAdapter:
 
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             rr = await client.get(f"{base_url}/contents/generations/tasks/{task_id}", headers=headers)
-            rr.raise_for_status()
+            raise_for_ark_status(rr)
             return rr.json()

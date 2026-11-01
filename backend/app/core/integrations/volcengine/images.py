@@ -18,6 +18,7 @@ from app.core.contracts.image_generation import (
 )
 from app.core.contracts.provider import ProviderConfig
 from app.core.integrations.image_capabilities import resolve_image_size
+from app.core.integrations.volcengine.errors import raise_for_ark_status
 from app.core.integrations.volcengine.image_capabilities import validate_volcengine_image_options
 
 
@@ -78,7 +79,7 @@ class VolcengineImageApiAdapter:
                 resp_headers=dict(r.headers),
                 resp_text=resp_text,
             )
-            r.raise_for_status()
+            raise_for_ark_status(r)
             data = r.json()
 
         return _parse_volcengine_images_payload(data)
