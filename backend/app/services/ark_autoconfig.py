@@ -7,7 +7,7 @@
 - 这里在首次启动（或 Key 变化）时自动完成：
   1. 区域探测：用只读的「列出视频任务」接口判断 Key 属于 BytePlus 国际站还是火山方舟国内站；
   2. 模型探测：对候选模型发送故意缺少必填字段的请求，400 = 已开通、404/ModelNotOpen = 未开通，
-     全程不触发任何生成计费；
+     全程不触发任何生成计费；视频默认选用账号已开通的「最新版」Seedance（按目录中的版本号排序）；
   3. 结果按 Key 指纹缓存到 `jellyfish_bootstrap_meta`，之后冷启动不再发起网络请求。
 
 环境变量 ARK_BASE_URL / ARK_TEXT_MODEL / ARK_IMAGE_MODEL / ARK_VIDEO_MODEL 仍可选地覆盖探测结果。
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 from typing import Any
 
@@ -54,10 +55,13 @@ ARK_MODEL_CANDIDATES: dict[str, dict[str, list[str]]] = {
             "seedream-4-5-251128",
             "seedream-5-0-260128",
         ],
+        # 视频：默认选用账号已开通的「最新版」Seedance；实际顺序以 /models 目录动态排序为准（见 rank_seedance_models）。
         "video": [
+            "dreamina-seedance-2-5-260628",
+            "dreamina-seedance-2-0-260128",
+            "seedance-1-5-pro-251215",
             "seedance-1-0-pro-250528",
             "seedance-1-0-pro-fast-251015",
-            "seedance-1-5-pro-251215",
         ],
     },
     "volcengine": {
@@ -71,9 +75,10 @@ ARK_MODEL_CANDIDATES: dict[str, dict[str, list[str]]] = {
             "doubao-seedream-4-5-251128",
         ],
         "video": [
+            "doubao-seedance-2-0-260128",
+            "doubao-seedance-1-5-pro-251215",
             "doubao-seedance-1-0-pro-250528",
             "doubao-seedance-1-0-pro-fast-251015",
-            "doubao-seedance-1-5-pro-251215",
         ],
     },
 }
@@ -87,6 +92,45 @@ _PROBE_REQUESTS: dict[str, tuple[str, Any]] = {
 
 _CATEGORIES = ("text", "image", "video")
 _CACHE_PREFIX = "ark_autoconfig:"
+# 选型策略版本：策略变化（如改为「最新 Seedance」）时递增，使已缓存的探测结果失效并重新探测。
+_AUTOCONFIG_STRATEGY_VERSION = ""
+
+_SEEDANCE_ID_RE = re.compile(r"seedance-(\d+)-(\d+)(?:-([a-z0-9-]+?))?-(\d{6,8})$")
+
+
+def _seedance_rank(model_id: str) -> tuple[int, int, int, int] | None:
+    """Seedance 模型排序键（越小越优先）：版本号降序 → 旗舰优先（pro/无后缀 > fast > mini/lite > t2v/i2v）→ 日期降序。"""
+    match = _SEEDANCE_ID_RE.search(model_id.lower())
+    if not match:
+        return None
+    major, minor, variant, date = match.group(1), match.group(2), match.group(3) or "", match.group(4)
+    if any(tag in variant for tag in ("t2v", "i2v")):
+        tier = 3
+    elif any(tag in variant for tag in ("mini", "lite")):
+        tier = 2
+    elif "fast" in variant:
+        tier = 1
+    else:
+        tier = 0
+    return (-int(major), -int(minor), tier, -int(date))
+
+
+def rank_seedance_models(model_ids: list[str]) -> list[str]:
+    """把 Seedance 模型 ID 按「最新、旗舰优先」排序；非 Seedance ID 被忽略。"""
+    ranked = [(rank, mid) for mid in model_ids if (rank := _seedance_rank(mid)) is not None]
+    return [mid for _, mid in sorted(ranked)]
+
+
+async def _list_catalogue(client: Any, *, base_url: str, api_key: str) -> list[str]:
+    """读取方舟模型目录（只读）；失败时返回空列表。"""
+    try:
+        resp = await client.get(f"{base_url}/models", headers={"Authorization": f"Bearer {api_key}"})
+        if resp.status_code >= 400:
+            return []
+        data = (resp.json() or {}).get("data") or []
+        return [str(item.get("id")) for item in data if isinstance(item, dict) and item.get("id")]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def api_key_fingerprint(api_key: str) -> str:
@@ -182,8 +226,13 @@ async def discover_ark_config(api_key: str, *, base_url_override: str | None = N
             base_url = ARK_BASE_URLS[region]
 
         plan: dict[str, Any] = {"region": region, "base_url": base_url, "detected": detected_region is not None}
+        catalogue = await _list_catalogue(client, base_url=base_url, api_key=api_key) if detected_region else []
         for category in _CATEGORIES:
-            candidates = ARK_MODEL_CANDIDATES[region][category]
+            candidates = list(ARK_MODEL_CANDIDATES[region][category])
+            if category == "video":
+                # 优先目录中的最新 Seedance（新版本发布后无需改代码），再兜底静态候选。
+                ranked = rank_seedance_models(catalogue)
+                candidates = ranked + [m for m in rank_seedance_models(candidates) if m not in ranked]
             chosen = candidates[0]
             if detected_region is not None:
                 for model in candidates:
@@ -245,7 +294,11 @@ async def resolve_ark_plan(session: AsyncSession, *, allow_discovery: bool = Tru
     fingerprint = api_key_fingerprint(api_key)
     override_base = (settings.ark_base_url or "").strip().rstrip("/")
     cache = await _read_cache(session)
-    cache_valid = cache.get("key_fp") == fingerprint and cache.get("base_override", "") == override_base
+    cache_valid = (
+        cache.get("key_fp") == fingerprint
+        and cache.get("base_override", "") == override_base
+        and cache.get("strategy", "") == _AUTOCONFIG_STRATEGY_VERSION
+    )
 
     if cache_valid:
         base = {k: cache[k] for k in ("region", "base_url", *_CATEGORIES) if k in cache}
@@ -258,6 +311,7 @@ async def resolve_ark_plan(session: AsyncSession, *, allow_discovery: bool = Tru
                 {
                     "key_fp": fingerprint,
                     "base_override": override_base,
+                    "strategy": _AUTOCONFIG_STRATEGY_VERSION,
                     **{k: base[k] for k in ("region", "base_url", *_CATEGORIES)},
                 },
             )

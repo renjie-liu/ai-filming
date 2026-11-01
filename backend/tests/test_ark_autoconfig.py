@@ -12,8 +12,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.services import ark_autoconfig
 
 
-def _fake_ark(enabled: set[str], *, valid_region: str = "byteplus", calls: list[str] | None = None) -> httpx.MockTransport:
-    """模拟方舟：只有 valid_region 认可 Key；enabled 中的模型返回 400（参数错误），其余 404。"""
+def _fake_ark(
+    enabled: set[str],
+    *,
+    valid_region: str = "byteplus",
+    calls: list[str] | None = None,
+    catalogue: list[str] | None = None,
+) -> httpx.MockTransport:
+    """模拟方舟：只有 valid_region 认可 Key；enabled 中的模型返回 400（参数错误），其余 404；/models 返回 catalogue。"""
     region_host = {"byteplus": "bytepluses.com", "volcengine": "volces.com"}[valid_region]
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -21,6 +27,8 @@ def _fake_ark(enabled: set[str], *, valid_region: str = "byteplus", calls: list[
             calls.append(f"{request.method} {request.url.path}")
         if region_host not in request.url.host:
             return httpx.Response(401, json={"error": {"code": "AuthenticationError"}})
+        if request.method == "GET" and request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": m} for m in (catalogue or [])]})
         if request.method == "GET":
             return httpx.Response(200, json={"items": [], "total": 0})
         model = json.loads(request.content or b"{}").get("model")
@@ -109,3 +117,35 @@ async def test_resolve_plan_caches_by_key_fingerprint(mock_httpx, monkeypatch: p
         await ark_autoconfig.resolve_ark_plan(session)
     assert len(calls) > network_calls
     await engine.dispose()
+
+
+def test_rank_seedance_models_latest_flagship_first() -> None:
+    ids = [
+        "seedance-1-0-pro-250528",
+        "dreamina-seedance-2-0-fast-260128",
+        "dreamina-seedance-2-5-260628",
+        "seedance-1-5-pro-251215",
+        "dreamina-seedance-2-0-260128",
+        "seedance-1-0-lite-t2v-250428",
+        "seedream-4-0-250828",
+    ]
+    ranked = ark_autoconfig.rank_seedance_models(ids)
+    assert ranked[:3] == ["dreamina-seedance-2-5-260628", "dreamina-seedance-2-0-260128", "dreamina-seedance-2-0-fast-260128"]
+    assert "seedream-4-0-250828" not in ranked
+    assert ranked[-1] == "seedance-1-0-lite-t2v-250428"
+
+
+async def test_discover_defaults_to_latest_enabled_seedance(mock_httpx) -> None:
+    # 目录里出现了比静态候选更新的 3.0；但账号只开通了 2.5 与 1.0 → 选 2.5。
+    catalogue = ["dreamina-seedance-3-0-270101", "dreamina-seedance-2-5-260628", "seedance-1-0-pro-250528", "seed-2-0-lite-260428"]
+    mock_httpx["transport"] = _fake_ark(
+        {"dreamina-seedance-2-5-260628", "seedance-1-0-pro-250528", "seed-2-0-lite-260428", "seedream-4-0-250828"},
+        catalogue=catalogue,
+    )
+    plan = await ark_autoconfig.discover_ark_config("ark-test-key")
+    assert plan["video"] == "dreamina-seedance-2-5-260628"
+
+    # 3.0 也开通后，自动选择最新的 3.0。
+    mock_httpx["transport"] = _fake_ark({"dreamina-seedance-3-0-270101", "dreamina-seedance-2-5-260628"}, catalogue=catalogue)
+    plan = await ark_autoconfig.discover_ark_config("ark-test-key")
+    assert plan["video"] == "dreamina-seedance-3-0-270101"
