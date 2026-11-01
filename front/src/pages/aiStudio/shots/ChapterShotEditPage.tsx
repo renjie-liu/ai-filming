@@ -1049,7 +1049,7 @@ export function ChapterShotEditPage() {
                 : data?.characters
         const item = (bucket?.[0] as EntityNameExistenceItem | undefined) ?? null
         if (!item) {
-          message.error('existence-check 返回为空')
+          message.error('资产查重结果为空')
           return
         }
 
@@ -1097,7 +1097,7 @@ export function ChapterShotEditPage() {
 
         message.info('该资产已关联到当前镜头')
       } catch {
-        message.error('existence-check 调用失败')
+        message.error('资产查重失败，请稍后重试')
       }
     },
     [openLinkingModal, chapterId, projectId, projectStyle, projectVisualStyle, shotId],

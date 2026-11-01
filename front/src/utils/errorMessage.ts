@@ -1,0 +1,96 @@
+/**
+ * 错误提示中文化工具。
+ *
+ * 为什么存在：后端（以及 Seedance / 方舟等供应商）返回的错误多为英文，
+ * 部分页面会把它们原样弹出；界面统一为中文后，这里把常见错误映射为中文说明，
+ * 无法识别的英文错误显示调用方给出的中文兜底文案（原文输出到控制台便于排查）。
+ */
+
+const CJK_RE = /[一-鿿]/
+
+const CATEGORY_LABELS: Record<string, string> = { text: '文本', image: '图片', video: '视频' }
+
+/** [匹配规则, 中文文案]；按顺序匹配，命中第一条即返回。 */
+const RULES: Array<[RegExp, string | ((m: RegExpMatchArray) => string)]> = [
+  // ---- 模型 / 供应商配置 ----
+  [/No default model configured for category=(\w+)/i, (m) => `尚未设置默认${CATEGORY_LABELS[m[1]] ?? ''}模型，请在「模型管理 → 设置」中选择`],
+  [/No default video model configured/i, '尚未设置默认视频模型，请在「模型管理 → 设置」中选择'],
+  [/No image model configured/i, '尚未设置默认图片模型，请在「模型管理 → 设置」中选择'],
+  [/No text model configured/i, '该供应商下没有文本模型，请在「模型管理」中添加'],
+  [/Provider api_key is empty/i, '供应商缺少 API Key，请检查部署环境变量 SEEDDANCE_API_KEY'],
+  [/Provider is disabled/i, '该模型供应商已停用，请在「模型管理」中启用'],
+  [/Configured (default )?(video )?model (not found|is not)/i, '默认模型配置无效，请在「模型管理 → 设置」中重新选择'],
+  [/Provider not found/i, '模型供应商不存在，请在「模型管理」中检查配置'],
+  [/does not support category=(\w+)/i, (m) => `该供应商不支持${CATEGORY_LABELS[m[1]] ?? ''}模型`],
+  [/Install (httpx|langchain-openai)/i, '服务端缺少运行依赖，请联系管理员'],
+  // ---- 供应商（Seedance / 方舟）常见错误码 ----
+  [/ModelNotOpen|InvalidEndpointOrModel|not activated/i, '模型未在 Seedance 账户中开通，请在 BytePlus 控制台开通或在「模型管理」中更换模型'],
+  [/InsufficientBalance|AccountOverdue|Insufficient(Quota|Funds)|quota/i, 'Seedance 账户余额或额度不足，请充值后重试'],
+  [/RateLimit|TooManyRequests|429/i, '请求过于频繁，请稍后重试'],
+  [/Sensitive|risk|ContentPolicy|moderation/i, '提示词或图片未通过内容安全审核，请修改后重试'],
+  [/AuthenticationError|Unauthorized|401|api key doesn't exist/i, 'Seedance API Key 无效，请检查部署环境变量 SEEDDANCE_API_KEY'],
+  [/parameter ratio .*not valid|ratio is required/i, '视频比例不可用，请检查项目默认比例或镜头比例'],
+  [/parameter duration .*not valid|duration .*must be/i, '视频时长不在模型支持范围内，请调整镜头时长'],
+  [/timed? ?out|Timeout/i, '生成超时，请稍后重试'],
+  // ---- 业务校验 ----
+  [/Shot duration is not configured/i, '镜头未设置时长，请先在分镜中设置时长'],
+  [/Required frame image is missing: (\w+)/i, '缺少所需的关键帧图片，请先在「关键帧与参考图」中生成'],
+  [/requires exactly (\d+) images?, got (\d+)/i, (m) => `参考图数量不符：需要 ${m[1]} 张，当前 ${m[2]} 张`],
+  [/prompt is required/i, '提示词不能为空'],
+  [/Chapter already has shots/i, '该章节已有分镜，请先清空后再重新提取'],
+  [/does not belong to/i, '数据归属不一致，请刷新页面后重试'],
+  [/Invalid image file_id|File is not an image|Empty file content|Failed to download file/i, '参考图片不可用，请重新生成或上传'],
+  [/Failed to (divide|extract|merge|analyze|check|optimize|simplify)/i, 'AI 处理失败，请稍后重试'],
+  [/is required/i, '缺少必填信息，请补充后重试'],
+  [/already exists/i, '数据已存在'],
+  [/not found/i, '数据不存在或已被删除，请刷新页面'],
+  // ---- HTTP 状态文本 ----
+  [/^Bad Request$/i, '请求参数有误'],
+  [/^Not Found$/i, '数据不存在或已被删除'],
+  [/^Unprocessable Entity$/i, '提交的数据格式不正确'],
+  [/^Service Unavailable$/i, '服务暂不可用，请稍后重试'],
+  [/^Internal Server Error$/i, '服务器内部错误，请稍后重试'],
+  [/^(Failed to fetch|Network ?Error|Load failed)$/i, '网络异常，请检查网络后重试'],
+]
+
+/**
+ * 从异常对象中提取后端 / 网络错误原文。
+ *
+ * 兼容：统一响应 `{ code, message }`（body.message）、FastAPI `{ detail }`、生成客户端 ApiError、字符串。
+ */
+export function extractErrorText(error: unknown): string {
+  if (!error) return ''
+  if (typeof error === 'string') return error.trim()
+  if (typeof error === 'object') {
+    const e = error as { body?: { detail?: unknown; message?: unknown }; detail?: unknown; message?: unknown }
+    for (const candidate of [e.body?.detail, e.body?.message, e.detail, e.message]) {
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+    }
+  }
+  return ''
+}
+
+/**
+ * 把错误原文转换为中文提示。
+ *
+ * @param raw 错误原文（可能为英文）
+ * @param fallback 无法识别时显示的中文兜底文案
+ * @returns 中文提示：原文已含中文则原样返回；命中规则返回对应中文；否则返回 fallback
+ */
+export function localizeErrorMessage(raw: string | null | undefined, fallback: string): string {
+  const text = (raw ?? '').trim()
+  if (!text) return fallback
+  if (CJK_RE.test(text)) return text
+  for (const [pattern, replacement] of RULES) {
+    const match = text.match(pattern)
+    if (match) return typeof replacement === 'function' ? replacement(match) : replacement
+  }
+  // eslint-disable-next-line no-console
+  console.warn('[error]', text)
+  return fallback
+}
+
+/** 便捷组合：从异常中提取原文并转换为中文提示。 */
+export function toChineseErrorMessage(error: unknown, fallback: string): string {
+  return localizeErrorMessage(extractErrorText(error), fallback)
+}

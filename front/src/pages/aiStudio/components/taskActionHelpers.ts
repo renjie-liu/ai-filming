@@ -1,4 +1,5 @@
 import { message } from 'antd'
+import { toChineseErrorMessage } from '../../../utils/errorMessage'
 import { FilmService } from '../../../services/generated'
 import type { TaskStatus } from '../../../services/generated'
 import type { RelationTaskState } from '../project/ProjectWorkbench/chapterDivisionTasks'
@@ -27,20 +28,9 @@ type ExecuteAsyncTaskCreateOptions<T extends AsyncTaskCreateLike> = {
   getErrorMessage?: (error: unknown, fallbackErrorMessage: string) => string
 }
 
+/** 任务类操作的默认错误提示：提取后端错误并转换为中文（无法识别时使用 fallbackErrorMessage）。 */
 export function defaultTaskActionErrorMessage(error: unknown, fallbackErrorMessage: string): string {
-  if (!error) return fallbackErrorMessage
-  if (typeof error === 'string' && error.trim()) return error
-  if (typeof error === 'object') {
-    const maybeAny = error as {
-      body?: { detail?: unknown }
-      detail?: unknown
-      message?: unknown
-    }
-    const detail = maybeAny.body?.detail ?? maybeAny.detail
-    if (typeof detail === 'string' && detail.trim()) return detail
-    if (typeof maybeAny.message === 'string' && maybeAny.message.trim()) return maybeAny.message
-  }
-  return fallbackErrorMessage
+  return toChineseErrorMessage(error, fallbackErrorMessage)
 }
 
 type TaskCancelReadLike = {

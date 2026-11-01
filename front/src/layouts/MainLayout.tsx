@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
+import { LANGUAGE_STORAGE_KEY } from '../i18n'
 import { useTranslation } from 'react-i18next'
 import { TaskCenter } from '../pages/aiStudio/components/TaskCenter'
 import { TaskRuntimeProvider } from '../pages/aiStudio/components/TaskRuntimeProvider'
@@ -31,7 +32,7 @@ const MainLayout: React.FC = () => {
   const language = useAppStore((state) => state.language)
   const setLanguage = useAppStore((state) => state.setLanguage)
 
-  // 让语言下拉框与 i18n 实际生效的语言保持一致（i18n 会按 localStorage / 浏览器语言自动检测，
+  // 让语言下拉框与 i18n 实际生效的语言保持一致（默认简体中文，用户切换后从 localStorage 读取，
   // 而 store 初始值固定为 zh-CN，否则会出现界面是英文、下拉框却显示「简体中文」的情况）。
   useEffect(() => {
     const resolved = (i18n.resolvedLanguage || i18n.language) === 'en-US' ? 'en-US' : 'zh-CN'
@@ -245,7 +246,7 @@ const MainLayout: React.FC = () => {
               onChange={(value) => {
                 setLanguage(value)
                 void i18n.changeLanguage(value)
-                window.localStorage.setItem('jellyfish_language', value)
+                window.localStorage.setItem(LANGUAGE_STORAGE_KEY, value)
                 document.documentElement.lang = value === 'en-US' ? 'en' : 'zh-CN'
               }}
               options={[

@@ -1,43 +1,39 @@
-# Using Jellyfish: from script to video
+# 使用指南：从剧本到成片
 
-The same guide is built into the app: open **Guide** (使用指南) in the left menu. The
-project list also shows a **Quick start** card until you dismiss it. App buttons are
-in Chinese, so this guide quotes each one in 「」 with its English meaning.
+应用内同样提供本指南：左侧菜单「使用指南」；项目列表顶部也会显示「快速上手」卡片（可关闭）。
 
-AI models need no setup. The deployment connects Seedance automatically, and the
-banner at the top of the Guide and Model Management pages shows the default text,
-image and video models.
+AI 模型无需配置：部署时已自动接入 Seedance，默认文本 / 图片 / 视频模型会显示在「使用指南」和「模型管理」页顶部的提示中。视频默认使用账号中已开通的最新版 Seedance。
 
-## 1. Create a project
-- On the project list, click 「新建项目」 (New project).
-- Enter 「项目名称」 (Project name) and choose 「视觉风格」 (Visual style) and 「视频风格」 (Video style).
-- Also set 「默认视频比例」 (Default aspect ratio), e.g. 9:16. Video generation needs it.
-- Click 「创建并进入」 (Create and open).
+## 1. 新建项目
+- 在「项目列表」点击「新建项目」。
+- 填写「项目名称」，选择「视觉风格」与「视频风格」。
+- 建议同时设置「默认视频比例」（如竖屏 9:16），生成视频时需要用到。
+- 点击「创建并进入」。
 
-## 2. Paste your script
-- In the project workbench, open the 「章节」 (Chapters) tab and click 「创建第一章」 / 「新建章节」 (New chapter).
-- Enter 「章节标题」 (Chapter title) and paste the script into 「章节内容（可粘贴剧本）」 (Chapter content), then click 「创建」 (Create).
-- In the 「章节创建成功」 (Chapter created) dialog, click 「立即提取分镜」 (Extract shots now).
+## 2. 粘贴剧本
+- 在项目工作台切到「章节」标签，点击「创建第一章」或「新建章节」。
+- 填写「章节标题」，把剧本粘贴到「章节内容（可粘贴剧本）」，点击「创建」。
+- 弹出「章节创建成功」后，点击「立即提取分镜」。
 
-## 3. Split into shots (AI)
-- Click 「提取分镜」 (Extract shots) on the chapter row, or 「一键提取分镜」 on the shots page.
-- It takes about 1–2 minutes. Progress shows in 「任务中心」 (Task center), the floating button at the bottom left.
+## 3. AI 拆分镜
+- 在章节行点击「提取分镜」，或在分镜页点击「一键提取分镜」。
+- 通常需要 1–2 分钟，进度可在左下角「任务中心」查看，期间可以离开页面。
 
-## 4. Confirm each shot (shot editor = preparation)
-- On a shot, click 「编辑」 (Edit), open 「2 提取确认」 (Extraction review) and click 「提取并刷新候选」 (Extract candidates).
-- For each asset candidate, click 「关联」 (Link) / 「新建」 (Create) / 「忽略」 (Ignore). For dialogue, click 「全部接受」 (Accept all). For a shot with nothing to extract, click 「无需提取」 (No extraction needed).
-- 「准备完成」 (Ready) means the shot is ready. Use 「继续处理下一个待处理镜头」 (Next pending shot) to move on.
+## 4. 确认镜头（分镜编辑页负责「准备」）
+- 在分镜列表点击某个镜头的「编辑」，切到「2 提取确认」，点击「提取并刷新候选」。
+- 资产候选点「关联」/「新建」/「忽略」，对白可「全部接受」；没有可提取内容的镜头点「无需提取」。
+- 显示「准备完成」即表示该镜头已就绪，用「继续处理下一个待处理镜头」逐个完成。
 
-## 5. Make keyframes (studio = generation)
-- Click 「进入工作室」 (Open studio). In 「分镜生成面板」 (Generation panel), open 「关键帧与参考图」 (Keyframes & references).
-- On 「首帧图片」 (First frame), click 「生成」 (Generate). Optionally click 「AI生成」 (AI draft) to write the prompt, then click 「生成」 (Generate). Seedream takes about 10–30 seconds.
+## 5. 生成关键帧（分镜工作室负责「生成」）
+- 点击「进入工作室」，在「分镜生成面板」切到「关键帧与参考图」。
+- 在「首帧图片」卡片点击「生成」，可先用「AI生成」起草提示词，再点击「生成」；Seedream 约 10–30 秒出图。
 
-## 6. Generate the video
-- Open the 「视频生成」 (Video) tab and check that 「视频准备度」 (Video readiness) shows 「可生成」 (Ready).
-- Click 「生成视频」 (Generate video), then 「生成」 (Generate). Seedance takes about 1–3 minutes, and clips appear under 「已生成视频」 (Generated videos).
-- For several shots: select them on the left and click 「批量生成」 (Batch generate).
-- When you're done, click 「进入后期剪辑」 (Open editor) in the project workbench to cut the clips together.
+## 6. 生成视频
+- 切到「视频生成」，确认「视频准备度」显示「可生成」。
+- 点击「生成视频」→「生成」；生成的视频出现在「已生成视频」中。
+- 多个镜头可在左侧多选后点击「批量生成」。
+- 完成后在项目工作台点击「进入后期剪辑」拼接成片。
 
-## Tips
-- Images and videos use Seedance credits, and video is the expensive part. Try one shot before batch-generating.
-- On Vercel's Hobby plan, each generation must finish within 5 minutes. A job that times out stays shown as running; generate it again.
+## 小贴士
+- 图片与视频会消耗 Seedance 账户额度，视频最贵；建议先用 1 个镜头试一遍再批量生成。
+- 当前部署（Vercel Hobby）下单个生成任务需在 5 分钟内完成；超时的任务会一直显示运行中，重新生成即可。

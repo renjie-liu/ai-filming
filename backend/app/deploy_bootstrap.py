@@ -33,6 +33,7 @@ _META_TABLE_NAME = "jellyfish_bootstrap_meta"
 _PROMPT_SEED_FILE = BACKEND_ROOT / "sql" / "001-init-prompt-template.sql"
 
 ARK_PROVIDER_ID = "ark-seedance"
+_AUTO_MODEL_DESCRIPTION = "自动配置（已在账号中开通）"
 
 def _import_all_models() -> None:
     import app.models.llm  # noqa: F401  # pylint: disable=unused-import
@@ -255,6 +256,10 @@ async def seed_ark_provider(session: AsyncSession) -> bool:
         return False
 
     changed = False
+    provider_description = (
+        f"通过 {ARK_REGION_LABELS.get(plan['region'], '方舟')} 接入 Seedance 视频 / Seedream 图片 / Seed 文本"
+        "（由部署环境变量中的 API Key 自动配置，无需手动填写）"
+    )
     provider = await session.get(Provider, ARK_PROVIDER_ID)
     if provider is None:
         provider = Provider(
@@ -263,7 +268,7 @@ async def seed_ark_provider(session: AsyncSession) -> bool:
             base_url=plan["base_url"],
             api_key=plan["api_key"],
             api_secret="",
-            description=f"Seedance / Seedream / Seed via {ARK_REGION_LABELS.get(plan['region'], 'Ark')} (auto-configured from deployment API key)",
+            description=provider_description,
             status=ProviderStatus.active,
             created_by="deploy-bootstrap",
         )
@@ -274,6 +279,9 @@ async def seed_ark_provider(session: AsyncSession) -> bool:
         if provider.api_key != plan["api_key"] or provider.base_url != plan["base_url"]:
             provider.api_key = plan["api_key"]
             provider.base_url = plan["base_url"]
+            changed = True
+        if provider.created_by == "deploy-bootstrap" and provider.description != provider_description:
+            provider.description = provider_description
             changed = True
 
     model_ids: dict[ModelCategoryKey, str] = {}
@@ -292,13 +300,24 @@ async def seed_ark_provider(session: AsyncSession) -> bool:
                 category=category,
                 provider_id=ARK_PROVIDER_ID,
                 params={},
-                description="auto-configured",
+                description=_AUTO_MODEL_DESCRIPTION,
                 created_by="deploy-bootstrap",
             )
             session.add(model)
             await session.flush()
             changed = True
         model_ids[category] = model.id
+
+    # 旧版本写入的英文描述统一改为中文（仅限本引导创建的模型，不动用户自建模型）。
+    auto_models = (
+        await session.execute(
+            select(Model).where(Model.provider_id == ARK_PROVIDER_ID, Model.created_by == "deploy-bootstrap")
+        )
+    ).scalars().all()
+    for auto_model in auto_models:
+        if auto_model.description != _AUTO_MODEL_DESCRIPTION:
+            auto_model.description = _AUTO_MODEL_DESCRIPTION
+            changed = True
 
     settings_row = await session.get(ModelSettings, 1)
     if settings_row is None:

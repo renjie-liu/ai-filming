@@ -35,7 +35,7 @@ ARK_BASE_URLS: dict[str, str] = {
 
 ARK_REGION_LABELS: dict[str, str] = {
     "byteplus": "BytePlus ModelArk",
-    "volcengine": "Volcengine Ark",
+    "volcengine": "火山方舟",
 }
 
 # 候选模型按优先级排列：优先选择与 Jellyfish 现有请求格式（Seedream 4.x 尺寸档位、Seedance 1.x content 结构）

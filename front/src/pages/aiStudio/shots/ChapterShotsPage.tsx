@@ -39,21 +39,14 @@ import { useRelationTaskNotification } from '../components/taskNotificationHelpe
 import { useTaskPageContext } from '../components/taskPageContext'
 import { createTaskSettledReloader } from '../components/taskResultHelpers'
 import { TASK_COPY } from '../components/taskCopy'
+import { toChineseErrorMessage } from '../../../utils/errorMessage'
 
 const { Header, Content } = Layout
 type ShotListFilter = 'all' | 'pending' | 'generating' | 'ready'
 
+/** 页面内错误提示：统一转换为中文。 */
 function getErrorMessage(e: unknown) {
-  if (!e) return '请求失败'
-  if (typeof e === 'string') return e
-  if (typeof e === 'object') {
-    const maybeAny = e as any
-    const detail = maybeAny?.body?.detail ?? maybeAny?.detail
-    if (typeof detail === 'string' && detail.trim()) return detail
-    const msg = maybeAny?.message
-    if (typeof msg === 'string' && msg.trim()) return msg
-  }
-  return '请求失败'
+  return toChineseErrorMessage(e, '请求失败')
 }
 
 function statusTag(status?: ShotStatus) {

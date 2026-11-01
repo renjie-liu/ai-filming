@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { toChineseErrorMessage } from '../../../utils/errorMessage'
 
 export type GenerationDraftState =
   | 'idle'
@@ -122,7 +123,7 @@ export function useGenerationDraft<TBase, TContext, TDerived, TSubmitResult = vo
       return next
     } catch (err) {
       setState('error')
-      setError(err instanceof Error ? err.message : 'derive failed')
+      setError(toChineseErrorMessage(err, '提示词生成失败，请稍后重试'))
       return null
     }
   }, [base, context, derive])
@@ -146,7 +147,7 @@ export function useGenerationDraft<TBase, TContext, TDerived, TSubmitResult = vo
       return result
     } catch (err) {
       setState('error')
-      setError(err instanceof Error ? err.message : 'submit failed')
+      setError(toChineseErrorMessage(err, '提交失败，请稍后重试'))
       return null
     }
   }, [base, context, deriveNow, derived, submit])

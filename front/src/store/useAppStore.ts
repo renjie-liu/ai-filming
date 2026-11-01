@@ -18,7 +18,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set) => ({
   siderCollapsed: false,
   user: {
-    name: 'Admin',
+    name: '管理员',
     role: '系统管理员',
   },
   language: 'zh-CN',

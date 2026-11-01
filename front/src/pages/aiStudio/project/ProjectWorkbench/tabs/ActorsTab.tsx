@@ -10,6 +10,7 @@ import { resolveAssetUrl } from '../../../assets/utils'
 import { DisplayImageCard } from '../../../assets/components/DisplayImageCard'
 import { ActorEntityFormModal } from '../../../assets/components/ActorEntityFormModal'
 import { encodeWorkbenchAssetEditReturnTo } from '../utils/workbenchAssetReturnTo'
+import { toChineseErrorMessage } from '../../../../../utils/errorMessage'
 
 type ActorLike = {
   id: string
@@ -119,11 +120,7 @@ export function ActorsTab() {
       setLinkModalOpen(false)
       await loadLinks()
     } catch (e: unknown) {
-      const msg =
-        e && typeof e === 'object' && 'body' in e && typeof (e as { body?: { detail?: string } }).body?.detail === 'string'
-          ? (e as { body: { detail: string } }).body.detail
-          : '关联失败'
-      message.error(msg)
+      message.error(toChineseErrorMessage(e, '关联失败'))
     } finally {
       setLinkingId(null)
     }
