@@ -93,13 +93,14 @@ async def build_character_image_submission_payload(
     prompt: str,
     images: list[str] | None,
 ) -> AssetImageSubmissionPayload:
-    image_row = await validate_character_image(db, character_id=character_id, image_id=image_id)
+    # image_id 为空：角色级任务（relation_type="character"），执行器完成后创建首张正面形象图。
+    image_row = await validate_character_image(db, character_id=character_id, image_id=image_id) if image_id is not None else None
     base = AssetImageBaseDraft(
         entity_type="character",
         entity_id=character_id,
-        image_id=image_row.id,
-        relation_type="character_image",
-        relation_entity_id=str(image_row.id),
+        image_id=image_row.id if image_row is not None else None,
+        relation_type="character_image" if image_row is not None else "character",
+        relation_entity_id=str(image_row.id) if image_row is not None else character_id,
         prompt=(prompt or "").strip(),
         default_images=[],
     )

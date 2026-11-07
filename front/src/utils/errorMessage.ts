@@ -30,6 +30,7 @@ const RULES: Array<[RegExp, string | ((m: RegExpMatchArray) => string)]> = [
   // 方舟内容审核：区分「生成结果被拦截（含版权）」与「输入的提示词 / 图片被拦截」，给出可操作的修改方向。
   [/OutputVideoSensitiveContentDetected[\s\S]*copyright|copyright/i, '生成的视频疑似涉及版权内容（如知名角色、品牌、影视作品或音乐），未通过平台审核。请把提示词改成原创的人物与场景描述后重试'],
   [/Output(Video|Audio|Image)SensitiveContentDetected/i, '生成的视频未通过平台内容审核，请调整提示词后重试'],
+  [/InputImageSensitiveContentDetected\.PrivacyInformation|may contain real person/i, '视频平台不接受含真人形象的参考图（真人实拍风格常见）。可以改用「仅文字描述」生成，或把作品画面改为动漫'],
   [/InputImageSensitiveContentDetected/i, '参考图片未通过内容安全审核，请更换图片后重试'],
   [/Input(Text)?SensitiveContentDetected/i, '提示词未通过内容安全审核，请修改后重试'],
   [/Sensitive|\brisk\b|ContentPolicy|moderation|PolicyViolation/i, '提示词或图片未通过内容安全审核，请修改后重试'],

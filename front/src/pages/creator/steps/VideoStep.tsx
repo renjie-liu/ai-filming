@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Button, Card, Progress, Table, Tag, message } from 'antd'
 import type { CreatorBoardRead, CreatorShotRead } from '../../../services/generated'
 import { localizeErrorMessage } from '../../../utils/errorMessage'
-import { generateVideo, resolveRatio } from '../actions'
+import { generateVideo, isRealPersonRejection, resolveRatio } from '../actions'
 import { ArtBox, DurationBadge, IndexBadge, TaskTag, taskErrorText } from '../ui'
 import { isActiveStatus } from '../taskPolling'
 
@@ -28,8 +28,9 @@ const VideoStep: React.FC<Props> = ({ board, onBack, onFinal, onTaskStarted, onE
   const ratio = resolveRatio(board)
   const started = videoStarted(board) || starting
 
-  const runOne = async (shot: CreatorShotRead) => {
-    await generateVideo({ shot, ratio })
+  // 上次因参考图含真人形象被拒的镜头，重试时自动改用纯文字描述。
+  const runOne = async (shot: CreatorShotRead, textOnly = false) => {
+    await generateVideo({ shot, ratio, textOnly: textOnly || isRealPersonRejection(shot.video_task?.error) })
   }
   const startAll = async () => {
     const todo = board.shots.filter((s) => !s.video_file_id && !(s.video_task && isActiveStatus(s.video_task.status)))
@@ -53,10 +54,10 @@ const VideoStep: React.FC<Props> = ({ board, onBack, onFinal, onTaskStarted, onE
   }
   if (startRef) startRef.current = () => void startAll()
 
-  const retry = async (shot: CreatorShotRead) => {
+  const retry = async (shot: CreatorShotRead, textOnly = false) => {
     setRetrying((p) => ({ ...p, [shot.id]: true }))
     try {
-      await runOne(shot)
+      await runOne(shot, textOnly)
       onTaskStarted()
     } catch (e) {
       message.error(localizeErrorMessage(e instanceof Error ? e.message : String(e), '视频任务创建失败'))
@@ -150,7 +151,7 @@ const VideoStep: React.FC<Props> = ({ board, onBack, onFinal, onTaskStarted, onE
                   <div className="flex gap-2 mt-2">
                     {!active && (
                       <Button size="small" type={error && !s.video_file_id ? 'primary' : 'default'} loading={retrying[s.id]} onClick={() => void retry(s)}>
-                        {s.video_file_id ? '重新生成' : '重试'}
+                        {s.video_file_id ? '重新生成' : isRealPersonRejection(s.video_task?.error) ? '改用文字描述重试' : '重试'}
                       </Button>
                     )}
                     {error && !s.video_file_id && <Button size="small" onClick={onEditShot}>修改描述</Button>}

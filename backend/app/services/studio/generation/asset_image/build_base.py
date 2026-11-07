@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import HTTPException, status
 
 from app.models.studio import (
+    AssetQualityLevel,
     Actor,
     ActorImage,
     AssetViewAngle,
@@ -42,7 +43,7 @@ class AssetImageBaseDraft(GenerationBaseDraft):
     kind: str = "asset_image"
     entity_type: str
     entity_id: str
-    image_id: int
+    image_id: int | None
     relation_type: str
     relation_entity_id: str
     prompt: str
@@ -215,7 +216,12 @@ async def build_character_image_base_draft(
     character = await db.get(Character, character_id)
     if character is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=entity_not_found("Character"))
-    image_row = await validate_character_image(db, character_id=character_id, image_id=image_id)
+    # image_id 为空时按「角色级」生成：不要求预先存在 CharacterImage 槽位（CharacterImage.file_id 非空，
+    # 无法先建空槽位），任务以 relation_type="character" 落库，执行器会在生成完成后创建首张正面形象图。
+    image_row = await validate_character_image(db, character_id=character_id, image_id=image_id) if image_id is not None else None
+    view_angle = image_row.view_angle if image_row is not None else AssetViewAngle.front
+    quality_level = image_row.quality_level if image_row is not None else AssetQualityLevel.low
+    image_format = (image_row.format if image_row is not None else None) or "png"
     prompt = await build_prompt_with_template(
         db,
         category=PromptCategory.combined,
@@ -224,9 +230,9 @@ async def build_character_image_base_draft(
             "description": character.description,
             "visual_style": _enum_value(character.visual_style),
             "style": _enum_value(character.style),
-            "view_angle": map_view_angle_for_prompt(image_row.view_angle),
-            "quality_level": image_row.quality_level,
-            "format": image_row.format,
+            "view_angle": map_view_angle_for_prompt(view_angle),
+            "quality_level": quality_level,
+            "format": image_format,
         },
         fallback_prompt=character.description,
         not_found_msg="Character.description is empty",
@@ -261,9 +267,9 @@ async def build_character_image_base_draft(
     return AssetImageBaseDraft(
         entity_type="character",
         entity_id=character_id,
-        image_id=image_row.id,
-        relation_type="character_image",
-        relation_entity_id=str(image_row.id),
+        image_id=image_row.id if image_row is not None else None,
+        relation_type="character_image" if image_row is not None else "character",
+        relation_entity_id=str(image_row.id) if image_row is not None else character_id,
         prompt=prompt,
         default_images=refs,
     )

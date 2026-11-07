@@ -309,7 +309,7 @@ async def create_character_image_generation_task(
     """为角色创建图片生成任务（对应 CharacterImage 业务）。
 
     - path 参数 character_id 为 Character.id
-    - body.image_id 必须为该角色下的 CharacterImage.id
+    - body.image_id 为该角色下的 CharacterImage.id；为空时按角色级生成，完成后自动创建首张正面形象图
     """
     prompt = (body.prompt or "").strip()
     if not prompt:

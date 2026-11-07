@@ -150,7 +150,8 @@ export async function prepareChapter(args: { projectId: string; chapterId: strin
 /** 为角色 / 场景 / 道具 / 服装生成一张形象图（没有图片槽位时先创建）。 */
 export async function generateEntityImage(entity: CreatorEntityRead): Promise<void> {
   let imageId = entity.image_id ?? null
-  if (imageId === null || imageId === undefined) {
+  // 角色不需要预建图片槽位（后端按角色级生成并自动创建首张形象图）；场景 / 道具 / 服装需要。
+  if (entity.type !== 'character' && (imageId === null || imageId === undefined)) {
     const created = await StudioEntitiesService.createEntityImageApiV1StudioEntitiesEntityTypeEntityIdImagesPost({
       entityType: entity.type,
       entityId: entity.id,
@@ -225,11 +226,17 @@ export async function generateKeyframe(args: { shot: CreatorShotRead; board: Cre
   })
 }
 
-/** 生成视频：有关键帧用首帧模式，否则纯文字；提示词由后端按镜头信息渲染。 */
-export async function generateVideo(args: { shot: CreatorShotRead; ratio: VideoRatio }): Promise<void> {
-  const { shot, ratio } = args
-  const referenceMode: VideoGenerationTaskRequest['reference_mode'] = shot.keyframe_file_id ? 'first' : 'text_only'
-  const images = shot.keyframe_file_id ? [shot.keyframe_file_id] : []
+/** 视频平台拒绝了含真人形象的参考图（真人实拍风格常见）；此时只能改用纯文字生成。 */
+export function isRealPersonRejection(error: string | null | undefined): boolean {
+  return /PrivacyInformation|real person/i.test(error ?? '')
+}
+
+/** 生成视频：有关键帧用首帧模式，否则纯文字；提示词由后端按镜头信息渲染。textOnly 可强制不带参考图。 */
+export async function generateVideo(args: { shot: CreatorShotRead; ratio: VideoRatio; textOnly?: boolean }): Promise<void> {
+  const { shot, ratio, textOnly } = args
+  const useFrame = !!shot.keyframe_file_id && !textOnly
+  const referenceMode: VideoGenerationTaskRequest['reference_mode'] = useFrame ? 'first' : 'text_only'
+  const images = useFrame ? [shot.keyframe_file_id as string] : []
   const preview = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
     requestBody: { shot_id: shot.id, reference_mode: referenceMode, prompt: null, images, ratio },
   })
