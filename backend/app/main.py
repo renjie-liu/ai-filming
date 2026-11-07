@@ -30,13 +30,35 @@ def _error_message(detail: object) -> str:
     return str(detail)
 
 
+def _database_outage_message(exc: Exception) -> str | None:
+    """把数据库连不上的异常翻成前端能读懂的信息；不是连接类异常则返回 None。
+
+    为什么存在：Neon 免费额度用完时 Postgres 会拒绝连接（"exceeded the quota"），
+    如果只回 500「Internal server error」，用户以为是程序坏了；这里和 Blob 暂停一样给出原因与出路。
+    """
+    from sqlalchemy.exc import DBAPIError
+
+    module = type(exc).__module__ or ""
+    if not isinstance(exc, DBAPIError) and not module.startswith("psycopg"):
+        return None
+    text = str(exc).lower()
+    if "exceeded the quota" in text:
+        return "Database quota exceeded: Neon 数据库已超出免费额度，暂时无法读写；请在 Neon 控制台升级套餐或等待额度重置"
+    if "connection" in text and ("failed" in text or "refused" in text or "timed out" in text or "is bad" in text):
+        return "Database unavailable: 数据库暂时无法连接，请稍后重试"
+    return None
+
+
 async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """HTTP 异常统一为 { code, message, data: null }。"""
+    """HTTP 异常统一为 { code, message, data: null }；数据库连接失败回 503 并说明原因。"""
     from fastapi import HTTPException
 
     if isinstance(exc, HTTPException):
         code = exc.status_code
         message = _error_message(exc.detail)
+    elif (outage := _database_outage_message(exc)) is not None:
+        code = 503
+        message = outage
     else:
         code = 500
         message = "Internal server error"

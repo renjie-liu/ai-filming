@@ -130,3 +130,34 @@ Fixes, pick one:
    project environment and redeploy; `storage_backend` in `/_deploy/status`
    switches to `s3`. Cloudflare R2's free tier (10 GB) is enough for hobby use.
    Files already stored in Blob stay readable through their public URLs.
+
+## Troubleshooting: Neon quota exceeded (every API call returns 503)
+
+Symptom: every API request fails; the response is
+`503 Database quota exceeded: Neon 数据库已超出免费额度…` and the creator page shows
+「数据库（Neon）已超出免费额度」. Runtime logs contain
+`psycopg.OperationalError … ERROR: Your account or project has exceeded the quota.
+Upgrade your plan to increase limits.` (the static frontend still loads).
+
+Cause: the Neon free plan's monthly compute / data-transfer allowance for the
+project was used up (board polling every 3 s while tasks run adds up).
+
+Fixes, pick one:
+
+1. Upgrade the Neon project (Vercel dashboard → Storage → the Neon database →
+   Open in Neon → Billing); connections resume immediately.
+2. Wait for the monthly reset.
+3. Point `DATABASE_URL` at another Postgres (any provider) and redeploy; tables
+   are created on first start by `ensure_bootstrapped`, but existing works are
+   not migrated automatically.
+
+Reduce usage: the board only polls while a task is running; close creator tabs
+you are not using, and avoid leaving the video step open for long batches.
+
+## Troubleshooting: `/ffmpeg/*` or other static files return the SPA HTML
+
+The first rewrite in `vercel.json` sends every non-API, non-asset path to
+`/index.html` so deep links work. Any new static directory under `front/dist`
+(for example `ffmpeg/`, copied at build time) must be added to that rule's
+negative lookahead, otherwise the browser receives `index.html` instead of the
+file and features depending on it (合成导出) fail with an import error.

@@ -13,7 +13,7 @@
   },
   "rewrites": [
     {
-      "source": "/((?!api/|docs$|redoc$|openapi\\.json$|assets/|env\\.js$|logo\\.svg$|mockServiceWorker\\.js$|index\\.html$).*)",
+      "source": "/((?!api/|docs$|redoc$|openapi\\.json$|assets/|ffmpeg/|env\\.js$|logo\\.svg$|mockServiceWorker\\.js$|index\\.html$).*)",
       "destination": "/index.html"
     },
     { "source": "/api/(.*)", "destination": { "service": "api" } },

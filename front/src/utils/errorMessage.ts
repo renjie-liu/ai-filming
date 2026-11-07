@@ -51,6 +51,9 @@ const RULES: Array<[RegExp, string | ((m: RegExpMatchArray) => string)]> = [
   [/is required/i, '缺少必填信息，请补充后重试'],
   [/already exists/i, '数据已存在'],
   [/not found/i, '数据不存在或已被删除，请刷新页面'],
+  // ---- 数据库（Neon Postgres）----
+  [/exceeded the quota|Database quota exceeded|数据库.*额度/i, '数据库（Neon）已超出免费额度，暂时无法读写。请在 Neon 控制台升级套餐或等待额度重置后再试'],
+  [/Database unavailable|connection to server at .* failed/i, '数据库暂时无法连接，请稍后重试'],
   // ---- 对象存储（Vercel Blob）----
   [/BlobStoreSuspended|limits-exceeded|usage ?quota|store has been suspended/i, '素材存储（Vercel Blob）已超出免费额度被暂停，图片和视频暂时无法保存。请在 Vercel 控制台升级套餐或等待额度重置，也可以改用 S3 兼容存储'],
   [/BlobServiceRateLimited/i, '存储服务限流，请稍后重试'],
