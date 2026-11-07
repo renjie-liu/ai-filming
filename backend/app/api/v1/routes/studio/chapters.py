@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,8 @@ from app.services.common import (
     require_entity,
 )
 from app.schemas.studio.projects import ChapterCreate, ChapterRead, ChapterUpdate
+from app.schemas.studio.creator import AutoConfirmResultRead, CreatorBoardRead
+from app.services.studio.creator_flow import auto_confirm_chapter, build_creator_board
 
 router = APIRouter()
 
@@ -157,3 +159,37 @@ async def delete_chapter(
 ) -> ApiResponse[None]:
     await delete_if_exists(db, Chapter, chapter_id)
     return empty_response()
+
+
+@router.post(
+    "/{chapter_id}/auto-confirm",
+    response_model=ApiResponse[AutoConfirmResultRead],
+    summary="创作模式：自动确认章节内全部提取候选（建档、关联、接受对白）",
+)
+async def auto_confirm_chapter_api(
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[AutoConfirmResultRead]:
+    """把「提取确认」自动化；状态语义不变，处理后镜头按原规则进入 ready。"""
+    try:
+        result = await auto_confirm_chapter(db, chapter_id=chapter_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await db.commit()
+    return success_response(result)
+
+
+@router.get(
+    "/{chapter_id}/creator-board",
+    response_model=ApiResponse[CreatorBoardRead],
+    summary="创作模式：章节聚合（镜头、实体、关键帧 / 视频与最近任务状态）",
+)
+async def get_creator_board_api(
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[CreatorBoardRead]:
+    try:
+        board = await build_creator_board(db, chapter_id=chapter_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return success_response(board)

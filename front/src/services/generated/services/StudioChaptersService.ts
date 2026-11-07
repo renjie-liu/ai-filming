@@ -2,7 +2,9 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ApiResponse_AutoConfirmResultRead_ } from '../models/ApiResponse_AutoConfirmResultRead_';
 import type { ApiResponse_ChapterRead_ } from '../models/ApiResponse_ChapterRead_';
+import type { ApiResponse_CreatorBoardRead_ } from '../models/ApiResponse_CreatorBoardRead_';
 import type { ApiResponse_NoneType_ } from '../models/ApiResponse_NoneType_';
 import type { ApiResponse_PaginatedData_ChapterRead__ } from '../models/ApiResponse_PaginatedData_ChapterRead__';
 import type { ChapterCreate } from '../models/ChapterCreate';
@@ -138,6 +140,49 @@ export class StudioChaptersService {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/chapters/{chapter_id}',
+            path: {
+                'chapter_id': chapterId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 创作模式：自动确认章节内全部提取候选（建档、关联、接受对白）
+     * 把「提取确认」自动化；状态语义不变，处理后镜头按原规则进入 ready。
+     * @returns ApiResponse_AutoConfirmResultRead_ Successful Response
+     * @throws ApiError
+     */
+    public static autoConfirmChapterApiApiV1StudioChaptersChapterIdAutoConfirmPost({
+        chapterId,
+    }: {
+        chapterId: string,
+    }): CancelablePromise<ApiResponse_AutoConfirmResultRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/chapters/{chapter_id}/auto-confirm',
+            path: {
+                'chapter_id': chapterId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 创作模式：章节聚合（镜头、实体、关键帧 / 视频与最近任务状态）
+     * @returns ApiResponse_CreatorBoardRead_ Successful Response
+     * @throws ApiError
+     */
+    public static getCreatorBoardApiApiV1StudioChaptersChapterIdCreatorBoardGet({
+        chapterId,
+    }: {
+        chapterId: string,
+    }): CancelablePromise<ApiResponse_CreatorBoardRead_> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/studio/chapters/{chapter_id}/creator-board',
             path: {
                 'chapter_id': chapterId,
             },

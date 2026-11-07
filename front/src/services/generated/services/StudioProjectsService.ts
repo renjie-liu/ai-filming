@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ApiResponse_list_ProjectOverviewRead__ } from '../models/ApiResponse_list_ProjectOverviewRead__';
 import type { ApiResponse_NoneType_ } from '../models/ApiResponse_NoneType_';
 import type { ApiResponse_PaginatedData_ProjectRead__ } from '../models/ApiResponse_PaginatedData_ProjectRead__';
 import type { ApiResponse_ProjectRead_ } from '../models/ApiResponse_ProjectRead_';
@@ -12,6 +13,17 @@ import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class StudioProjectsService {
+    /**
+     * 创作模式：作品列表（含章节 / 镜头 / 关键帧 / 视频计数与封面）
+     * @returns ApiResponse_list_ProjectOverviewRead__ Successful Response
+     * @throws ApiError
+     */
+    public static listProjectsOverviewApiV1StudioProjectsOverviewGet(): CancelablePromise<ApiResponse_list_ProjectOverviewRead__> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/studio/projects/overview',
+        });
+    }
     /**
      * 获取项目风格候选项
      * @returns ApiResponse_ProjectStyleOptionsRead_ Successful Response

@@ -21,6 +21,8 @@ from app.services.common import (
     get_or_404,
     patch_model,
 )
+from app.schemas.studio.creator import ProjectOverviewRead
+from app.services.studio.creator_flow import build_projects_overview
 from app.schemas.studio.projects import (
     ProjectCreate,
     ProjectRead,
@@ -59,6 +61,15 @@ def _validate_project_style_combo(*, visual_style: ProjectVisualStyle, style: Pr
             f"style is not allowed for visual_style: visual_style={visual_style.value}, "
             f"style={style.value}, allowed={[item.value for item in allowed]}"
         )
+
+
+@router.get(
+    "/overview",
+    response_model=ApiResponse[list[ProjectOverviewRead]],
+    summary="创作模式：作品列表（含章节 / 镜头 / 关键帧 / 视频计数与封面）",
+)
+async def list_projects_overview(db: AsyncSession = Depends(get_db)) -> ApiResponse[list[ProjectOverviewRead]]:
+    return success_response(await build_projects_overview(db))
 
 
 @router.get(
