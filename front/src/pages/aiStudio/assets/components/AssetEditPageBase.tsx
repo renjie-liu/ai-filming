@@ -601,7 +601,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       const submitted = await promptDraft.submitNow()
       const taskId = submitted?.taskId
       if (!taskId) {
-        message.error('生成任务创建失败：缺少任务 ID')
+        message.error(`生成任务创建失败：${promptDraft.getLastError() ?? '缺少任务 ID'}`)
         return
       }
       setGenerationTask({

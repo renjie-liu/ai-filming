@@ -11,6 +11,7 @@ from app.api.utils import apply_keyword_filter, apply_order, paginate
 from app.models.studio import (
     Chapter,
     Shot,
+    ShotDetail,
     ShotCandidateStatus,
     ShotDialogueCandidateStatus,
     ShotExtractedCandidate,
@@ -29,6 +30,7 @@ from app.services.common import (
     patch_model,
     require_entity,
 )
+from app.services.studio.shot_detail_defaults import build_default_shot_detail
 
 
 def _build_extraction_state(
@@ -204,10 +206,18 @@ async def create(
     *,
     body: ShotCreate,
 ) -> Shot:
-    """创建镜头。"""
+    """创建镜头，并同时写入默认镜头细节（时长等）。
+
+    与 AI 拆分镜写库保持一致：没有 ShotDetail 的镜头无法读取时长，也无法生成视频，
+    而前端没有单独补建细节的入口，因此在创建镜头时一并创建。
+    """
     await ensure_not_exists(db, Shot, body.id, detail=entity_already_exists("Shot"))
     await require_entity(db, Chapter, body.chapter_id, detail=entity_not_found("Chapter"), status_code=400)
-    return await create_and_refresh(db, Shot(**body.model_dump()))
+    shot = await create_and_refresh(db, Shot(**body.model_dump()))
+    if await db.get(ShotDetail, shot.id) is None:
+        db.add(build_default_shot_detail(shot.id))
+        await db.flush()
+    return shot
 
 
 async def get(

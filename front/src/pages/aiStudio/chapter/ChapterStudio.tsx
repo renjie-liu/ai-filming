@@ -4302,7 +4302,8 @@ function Inspector(props: {
       const submitted = await videoPromptDraft.submitNow()
       const taskId = submitted?.taskId
       if (!taskId) {
-        message.error('视频生成任务创建失败：缺少任务 ID')
+        // 后端拒绝时 submitNow 返回 null：优先展示真实原因（如镜头缺少时长），而不是笼统的「缺少任务 ID」。
+        message.error(`视频生成任务创建失败：${videoPromptDraft.getLastError() ?? '缺少任务 ID'}`)
         return
       }
       setVideoTaskId(taskId)
@@ -4621,7 +4622,7 @@ function Inspector(props: {
       const submitted = await keyframePromptDraft.submitNow()
       const taskId = submitted?.taskId
       if (!taskId) {
-        message.error('生成任务创建失败：缺少任务 ID')
+        message.error(`生成任务创建失败：${keyframePromptDraft.getLastError() ?? '缺少任务 ID'}`)
         updateCardState(frameType, { loading: false, taskStatus: 'failed' })
         return
       }

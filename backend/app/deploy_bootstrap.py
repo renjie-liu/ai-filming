@@ -356,11 +356,16 @@ async def run_deploy_bootstrap() -> dict[str, Any]:
             await session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _ADVISORY_LOCK_KEY})
         added_templates = await seed_prompt_templates(session)
         ark_changed = await seed_ark_provider(session)
+        # 存量修复：旧版本手动新建的镜头没有 ShotDetail，无法读取时长 / 生成视频（幂等，无缺失时为空操作）。
+        from app.services.studio.shot_detail_defaults import backfill_missing_shot_details
+
+        details_backfilled = await backfill_missing_shot_details(session)
         await session.commit()
     summary = {
         "schema_created": created,
         "prompt_templates_added": added_templates,
         "ark_provider_changed": ark_changed,
+        "shot_details_backfilled": details_backfilled,
     }
     logger.info("deploy bootstrap done: %s", summary)
     return summary

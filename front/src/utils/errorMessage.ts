@@ -34,6 +34,7 @@ const RULES: Array<[RegExp, string | ((m: RegExpMatchArray) => string)]> = [
   [/timed? ?out|Timeout/i, '生成超时，请稍后重试'],
   // ---- 业务校验 ----
   [/Shot duration is not configured/i, '镜头未设置时长，请先在分镜中设置时长'],
+  [/ShotDetail not found/i, '镜头缺少详情（时长、景别等），请刷新页面后重试'],
   [/Required frame image is missing: (\w+)/i, '缺少所需的关键帧图片，请先在「关键帧与参考图」中生成'],
   [/requires exactly (\d+) images?, got (\d+)/i, (m) => `参考图数量不符：需要 ${m[1]} 张，当前 ${m[2]} 张`],
   [/prompt is required/i, '提示词不能为空'],

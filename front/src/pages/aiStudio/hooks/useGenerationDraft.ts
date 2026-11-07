@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { toChineseErrorMessage } from '../../../utils/errorMessage'
 
 export type GenerationDraftState =
@@ -41,6 +41,12 @@ export type UseGenerationDraftResult<TBase, TContext, TDerived, TSubmitResult> =
   }) => void
   deriveNow: (overrides?: { base?: TBase; context?: TContext }) => Promise<TDerived | null>
   submitNow: () => Promise<TSubmitResult | null>
+  /**
+   * 最近一次 deriveNow / submitNow 失败的中文原因（同步读取）。
+   * 为什么存在：两者失败时返回 null，而 `error` 状态要到下一次渲染才更新；
+   * 调用方需要在同一个事件处理中把真实原因（如后端返回的 404/400 说明）提示给用户。
+   */
+  getLastError: () => string | null
   resetDerived: () => void
 }
 
@@ -58,6 +64,8 @@ export function useGenerationDraft<TBase, TContext, TDerived, TSubmitResult = vo
   const [state, setState] = useState<GenerationDraftState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [lastDerivedAt, setLastDerivedAt] = useState<number | null>(null)
+  // 与 error 状态同步写入，供调用方在同一次事件处理中读取失败原因。
+  const lastErrorRef = useRef<string | null>(null)
 
   const setBase = useCallback((updater: Updater<TBase>) => {
     setBaseState((prev) => applyUpdater(prev, updater))
@@ -115,6 +123,7 @@ export function useGenerationDraft<TBase, TContext, TDerived, TSubmitResult = vo
     const nextContext = overrides?.context ?? context
     setState('deriving')
     setError(null)
+    lastErrorRef.current = null
     try {
       const next = await derive({ base: nextBase, context: nextContext })
       setDerivedState(next)
@@ -122,8 +131,10 @@ export function useGenerationDraft<TBase, TContext, TDerived, TSubmitResult = vo
       setState('derived')
       return next
     } catch (err) {
+      const reason = toChineseErrorMessage(err, '提示词生成失败，请稍后重试')
+      lastErrorRef.current = reason
       setState('error')
-      setError(toChineseErrorMessage(err, '提示词生成失败，请稍后重试'))
+      setError(reason)
       return null
     }
   }, [base, context, derive])
@@ -141,16 +152,21 @@ export function useGenerationDraft<TBase, TContext, TDerived, TSubmitResult = vo
     const stableDerived = nextDerived as TDerived
     setState('submitting')
     setError(null)
+    lastErrorRef.current = null
     try {
       const result = await submit({ base, context, derived: stableDerived })
       setState('submitted')
       return result
     } catch (err) {
+      const reason = toChineseErrorMessage(err, '提交失败，请稍后重试')
+      lastErrorRef.current = reason
       setState('error')
-      setError(toChineseErrorMessage(err, '提交失败，请稍后重试'))
+      setError(reason)
       return null
     }
   }, [base, context, deriveNow, derived, submit])
+
+  const getLastError = useCallback(() => lastErrorRef.current, [])
 
   return {
     base,
@@ -168,6 +184,7 @@ export function useGenerationDraft<TBase, TContext, TDerived, TSubmitResult = vo
     hydrate,
     deriveNow,
     submitNow,
+    getLastError,
     resetDerived,
   }
 }
