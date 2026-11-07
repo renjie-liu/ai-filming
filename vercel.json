@@ -3,13 +3,7 @@
   "services": {
     "web": {
       "root": "front/",
-      "framework": "vite",
-      "routes": [
-        {
-          "src": "/(?!assets/|env\\.js$|logo\\.svg$|mockServiceWorker\\.js$|index\\.html$).*",
-          "transforms": [{ "type": "request.path", "op": "set", "args": "/index.html" }]
-        }
-      ]
+      "framework": "vite"
     },
     "api": {
       "root": "backend/",
@@ -18,6 +12,10 @@
     }
   },
   "rewrites": [
+    {
+      "source": "/((?!api/|docs$|redoc$|openapi\\.json$|assets/|env\\.js$|logo\\.svg$|mockServiceWorker\\.js$|index\\.html$).*)",
+      "destination": "/index.html"
+    },
     { "source": "/api/(.*)", "destination": { "service": "api" } },
     { "source": "/docs", "destination": { "service": "api" } },
     { "source": "/redoc", "destination": { "service": "api" } },
