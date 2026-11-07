@@ -33,3 +33,32 @@ def raise_for_ark_status(resp: Any) -> None:
     except Exception:  # noqa: BLE001 - 非 JSON 响应
         message = (getattr(resp, "text", "") or "")[:300]
     raise ArkApiError(status_code=resp.status_code, code=code, message=message[:500])
+
+
+class ArkTaskFailedError(RuntimeError):
+    """异步视频任务以 failed / cancelled 结束时抛出。
+
+    为什么存在：任务失败原因只在查询结果的 `error` 字段里（如生成后审核拦截
+    `OutputVideoSensitiveContentDetected.PolicyViolation`），原先把整个查询结果 dict 拼进异常，
+    前端只能粗略匹配。这里保留错误码与说明，消息格式：
+    `Ark video task <status> <code>: <message> (task <id>)`。
+    """
+
+    def __init__(self, *, task_id: str, status: str, code: str, message: str) -> None:
+        self.task_id = task_id
+        self.status = status
+        self.code = code
+        self.message = message
+        detail = f"{code or 'Error'}: {message}".strip() if (code or message) else "no error detail"
+        super().__init__(f"Ark video task {status} {detail} (task {task_id})")
+
+
+def task_failed_error(meta: dict[str, Any]) -> ArkTaskFailedError:
+    """由「查询视频生成任务」的返回构造 ArkTaskFailedError。"""
+    err = meta.get("error") if isinstance(meta.get("error"), dict) else {}
+    return ArkTaskFailedError(
+        task_id=str(meta.get("id") or ""),
+        status=str(meta.get("status") or ""),
+        code=str(err.get("code") or ""),
+        message=str(err.get("message") or "")[:500],
+    )

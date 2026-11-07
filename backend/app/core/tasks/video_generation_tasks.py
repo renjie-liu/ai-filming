@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
 
 from app.core.integrations.openai.video import OpenAIVideoApiAdapter
+from app.core.integrations.volcengine.errors import task_failed_error
 from app.core.integrations.volcengine.video import VolcengineVideoApiAdapter
 from app.core.contracts.provider import ProviderConfig
 from app.core.tasks.registry import resolve_task_adapter
@@ -190,7 +191,8 @@ class VolcengineVideoGenerationTask(AbstractVideoGenerationTask):
                     video_url = vu
             if status_val in ("succeeded", "failed", "cancelled"):
                 if status_val != "succeeded":
-                    raise RuntimeError(f"Volcengine task not succeeded: status={status_val!r} meta={meta!r}")
+                    # 保留方舟错误码与说明（如生成后审核拦截），便于前端给出准确的中文原因。
+                    raise task_failed_error(meta)
                 break
             await self._sleep_poll()
 

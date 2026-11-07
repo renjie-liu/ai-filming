@@ -67,3 +67,26 @@ def test_ark_error_keeps_provider_code_and_message() -> None:
         raise_for_ark_status(resp)
     assert "AccountOverdueError" in str(exc.value)
     assert "overdue balance" in str(exc.value)
+
+
+def test_task_failed_error_keeps_code_and_message() -> None:
+    """生成后审核拦截等任务级失败：异常信息保留方舟错误码与说明，而不是整个查询结果。"""
+    from app.core.integrations.volcengine.errors import ArkTaskFailedError, task_failed_error
+
+    meta = {
+        "id": "cgt-1",
+        "status": "failed",
+        "error": {
+            "code": "OutputVideoSensitiveContentDetected.PolicyViolation",
+            "message": "The request failed because the output video may be related to copyright restrictions.",
+        },
+        "generate_audio": True,
+    }
+    exc = task_failed_error(meta)
+    assert isinstance(exc, ArkTaskFailedError)
+    assert str(exc) == (
+        "Ark video task failed OutputVideoSensitiveContentDetected.PolicyViolation: "
+        "The request failed because the output video may be related to copyright restrictions. (task cgt-1)"
+    )
+    assert "generate_audio" not in str(exc)
+    assert str(task_failed_error({"id": "cgt-2", "status": "cancelled"})) == "Ark video task cancelled no error detail (task cgt-2)"

@@ -27,7 +27,12 @@ const RULES: Array<[RegExp, string | ((m: RegExpMatchArray) => string)]> = [
   [/ModelNotOpen|InvalidEndpointOrModel|not activated/i, '模型未在 Seedance 账户中开通，请在 BytePlus 控制台开通或在「模型管理」中更换模型'],
   [/InsufficientBalance|AccountOverdue|Insufficient(Quota|Funds)|quota/i, 'Seedance 账户余额或额度不足，请充值后重试'],
   [/RateLimit|TooManyRequests|429/i, '请求过于频繁，请稍后重试'],
-  [/Sensitive|risk|ContentPolicy|moderation/i, '提示词或图片未通过内容安全审核，请修改后重试'],
+  // 方舟内容审核：区分「生成结果被拦截（含版权）」与「输入的提示词 / 图片被拦截」，给出可操作的修改方向。
+  [/OutputVideoSensitiveContentDetected[\s\S]*copyright|copyright/i, '生成的视频疑似涉及版权内容（如知名角色、品牌、影视作品或音乐），未通过平台审核。请把提示词改成原创的人物与场景描述后重试'],
+  [/Output(Video|Audio|Image)SensitiveContentDetected/i, '生成的视频未通过平台内容审核，请调整提示词后重试'],
+  [/InputImageSensitiveContentDetected/i, '参考图片未通过内容安全审核，请更换图片后重试'],
+  [/Input(Text)?SensitiveContentDetected/i, '提示词未通过内容安全审核，请修改后重试'],
+  [/Sensitive|\brisk\b|ContentPolicy|moderation|PolicyViolation/i, '提示词或图片未通过内容安全审核，请修改后重试'],
   [/AuthenticationError|Unauthorized|401|api key doesn't exist/i, 'Seedance API Key 无效，请检查部署环境变量 SEEDDANCE_API_KEY'],
   [/parameter ratio .*not valid|ratio is required/i, '视频比例不可用，请检查项目默认比例或镜头比例'],
   [/parameter duration .*not valid|duration .*must be/i, '视频时长不在模型支持范围内，请调整镜头时长'],
