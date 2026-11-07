@@ -35,6 +35,7 @@ SCENE_INFO_ANALYSIS_RELATION_TYPE = "scene_info_analysis"
 COSTUME_INFO_ANALYSIS_RELATION_TYPE = "costume_info_analysis"
 SCRIPT_OPTIMIZATION_RELATION_TYPE = "script_optimization"
 SCRIPT_SIMPLIFICATION_RELATION_TYPE = "script_simplification"
+SCRIPT_DRAFT_RELATION_TYPE = "script_draft"
 SCRIPT_DIVIDE_TASK_KIND = "script_divide"
 SCRIPT_EXTRACT_TASK_KIND = "script_extract"
 SCRIPT_MERGE_TASK_KIND = "script_merge"
@@ -46,6 +47,7 @@ SCRIPT_SCENE_INFO_TASK_KIND = "script_scene_info"
 SCRIPT_COSTUME_INFO_TASK_KIND = "script_costume_info"
 SCRIPT_OPTIMIZE_TASK_KIND = "script_optimize"
 SCRIPT_SIMPLIFY_TASK_KIND = "script_simplify"
+SCRIPT_DRAFT_TASK_KIND = "script_draft"
 _ACTIVE_TASK_STATUSES = (
     GenerationTaskStatus.pending,
     GenerationTaskStatus.running,
@@ -633,6 +635,54 @@ async def create_script_simplification_task(
             "script_text": script_text,
         },
     )
+
+
+async def create_script_draft_task(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str | None,
+    idea: str,
+    target_seconds: int,
+    context: str | None,
+) -> AsyncTaskCreateResult:
+    """一句话起草剧本任务：把作品题材 / 画面风格与集数一起放进 run_args，worker 里直接喂给 ScriptDrafterAgent。
+
+    为什么在这里取作品信息：worker 用同步 Session 跑 LLM，不再回头查项目；创建任务时一次性备齐。
+    同一章节（或作品）已有起草任务在跑时复用它。
+    """
+    from app.models.studio import Chapter, Project
+
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    episode_index = 1
+    if chapter_id:
+        chapter = await db.get(Chapter, chapter_id)
+        if chapter is None or chapter.project_id != project_id:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        episode_index = int(chapter.index or 1)
+    relation_entity_id = (chapter_id or "").strip() or project_id
+    return await _create_analysis_task(
+        db,
+        task_kind=SCRIPT_DRAFT_TASK_KIND,
+        relation_type=SCRIPT_DRAFT_RELATION_TYPE,
+        relation_entity_id=relation_entity_id,
+        run_args={
+            "idea": idea.strip(),
+            "style": str(getattr(project.style, "value", project.style) or ""),
+            "visual_style": str(getattr(project.visual_style, "value", project.visual_style) or ""),
+            "target_seconds": int(target_seconds or 60),
+            "episode_index": episode_index,
+            "context": (context or "").strip() or None,
+        },
+    )
+
+
+def spawn_script_draft_task(task_id: str) -> None:
+    from app.tasks.execute_task import enqueue_task_execution
+
+    enqueue_task_execution(task_id)
 
 
 def spawn_extract_task(task_id: str) -> None:

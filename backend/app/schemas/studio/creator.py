@@ -173,6 +173,12 @@ class EntityShotsWrite(BaseModel):
     shot_ids: list[str] = Field(default_factory=list)
 
 
+class ShotOrderWrite(BaseModel):
+    """章节镜头的新顺序：必须包含本章节全部镜头各一次，按数组顺序重排序号。"""
+
+    shot_ids: list[str] = Field(default_factory=list)
+
+
 class CreatorEntityCreate(BaseModel):
     """创作页手动新增角色 / 场景 / 道具 / 服装，并可直接挂到若干镜头。"""
 

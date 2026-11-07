@@ -8,6 +8,7 @@ import type { ApiResponse_CreatorEntityCreatedRead_ } from '../models/ApiRespons
 import type { ApiResponse_EntityShotsWrite_ } from '../models/ApiResponse_EntityShotsWrite_';
 import type { ApiResponse_NoneType_ } from '../models/ApiResponse_NoneType_';
 import type { ApiResponse_ShotAudioRead_ } from '../models/ApiResponse_ShotAudioRead_';
+import type { ApiResponse_ShotOrderWrite_ } from '../models/ApiResponse_ShotOrderWrite_';
 import type { ApiResponse_TaskIdRead_ } from '../models/ApiResponse_TaskIdRead_';
 import type { ApiResponse_TaskIdsRead_ } from '../models/ApiResponse_TaskIdsRead_';
 import type { CharacterViewsRequest } from '../models/CharacterViewsRequest';
@@ -16,6 +17,7 @@ import type { EntityShotsWrite } from '../models/EntityShotsWrite';
 import type { FileAttachRequest } from '../models/FileAttachRequest';
 import type { PreviewGridRequest } from '../models/PreviewGridRequest';
 import type { ShotEntityLinksWrite } from '../models/ShotEntityLinksWrite';
+import type { ShotOrderWrite } from '../models/ShotOrderWrite';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
@@ -69,6 +71,31 @@ export class StudioCreatorService {
                 'chapter_id': chapterId,
                 'entity_type': entityType,
                 'entity_id': entityId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 创作模式：按给定顺序重排章节镜头（拖拽排序 / 上移下移）
+     * @returns ApiResponse_ShotOrderWrite_ Successful Response
+     * @throws ApiError
+     */
+    public static reorderChapterShotsApiApiV1StudioCreatorChaptersChapterIdShotOrderPut({
+        chapterId,
+        requestBody,
+    }: {
+        chapterId: string,
+        requestBody: ShotOrderWrite,
+    }): CancelablePromise<ApiResponse_ShotOrderWrite_> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/studio/creator/chapters/{chapter_id}/shot-order',
+            path: {
+                'chapter_id': chapterId,
             },
             body: requestBody,
             mediaType: 'application/json',

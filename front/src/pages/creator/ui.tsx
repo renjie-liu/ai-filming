@@ -38,7 +38,7 @@ export const ArtBox: React.FC<{
       className={`relative w-full ${aspect} bg-gray-100 overflow-hidden rounded-t-lg ${onClick ? 'cursor-pointer' : ''}`}
       onClick={onClick}
     >
-      {src && !video && <img src={src} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+      {src && !video && <img src={src} alt="" draggable={false} className="absolute inset-0 w-full h-full object-cover" />}
       {src && video && <video src={src} className="absolute inset-0 w-full h-full object-cover" muted playsInline preload="metadata" />}
       {!src && !active && <div className="absolute inset-0 grid place-items-center text-gray-400 text-xs px-3 text-center">{placeholder}</div>}
       {active && (

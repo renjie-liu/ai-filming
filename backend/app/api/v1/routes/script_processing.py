@@ -49,6 +49,7 @@ from app.services.script_processing_tasks import (
     create_merge_task,
     create_prop_info_task,
     create_scene_info_task,
+    create_script_draft_task,
     create_script_optimization_task,
     create_script_simplification_task,
     create_variant_task,
@@ -64,6 +65,7 @@ from app.services.script_processing_tasks import (
     spawn_merge_task,
     spawn_prop_info_task,
     spawn_scene_info_task,
+    spawn_script_draft_task,
     spawn_script_optimization_task,
     spawn_script_simplification_task,
     spawn_variant_task,
@@ -913,6 +915,53 @@ async def simplify_script_async(
     await db.commit()
     if not task_info.reused:
         spawn_script_simplification_task(task_info.task_id)
+    return success_response(
+        AsyncTaskCreateRead(
+            task_id=task_info.task_id,
+            status=task_info.status,
+            reused=task_info.reused,
+            relation_type=task_info.relation_type,
+            relation_entity_id=task_info.relation_entity_id,
+        )
+    )
+
+
+# ============================================================================
+# 6b. ScriptDrafterAgent - 一句话起草剧本（创作页 ① 的起点）
+# ============================================================================
+
+
+class ScriptDraftRequest(BaseModel):
+    """一句话起草剧本请求。"""
+
+    project_id: str = Field(..., description="作品 ID（题材 / 画面风格从这里取）", min_length=1)
+    chapter_id: str | None = Field(None, description="章节 ID（可选；给出时按该集的集数写，任务关联到章节）")
+    idea: str = Field(..., description="一句话创意 / 故事想法", min_length=2, max_length=2000)
+    target_seconds: int = Field(60, ge=15, le=600, description="目标成片时长（秒），决定剧本篇幅")
+    context: str | None = Field(None, description="前情提要或补充要求（可选，例如上一集结尾、必须出现的角色）", max_length=4000)
+
+
+@router.post(
+    "/draft-script-async",
+    response_model=ApiResponse[AsyncTaskCreateRead],
+    summary="异步按一句话创意起草一集剧本",
+    description="创建剧本起草任务并立即返回 task_id；任务结果为 ScriptDraftResult（title / logline / outline / script_text / notes），前端轮询后填入剧本框。",
+)
+async def draft_script_async(
+    request: ScriptDraftRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[AsyncTaskCreateRead]:
+    task_info = await create_script_draft_task(
+        db,
+        project_id=request.project_id,
+        chapter_id=request.chapter_id,
+        idea=request.idea,
+        target_seconds=request.target_seconds,
+        context=request.context,
+    )
+    await db.commit()
+    if not task_info.reused:
+        spawn_script_draft_task(task_info.task_id)
     return success_response(
         AsyncTaskCreateRead(
             task_id=task_info.task_id,

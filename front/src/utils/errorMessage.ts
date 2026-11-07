@@ -66,6 +66,10 @@ const RULES: Array<[RegExp, string | ((m: RegExpMatchArray) => string)]> = [
   [/Audio reference needs a public URL/i, '音频需要可公网访问的地址，请重新上传一次'],
   [/Invalid audio file_id/i, '音频文件不可用，请重新上传'],
   [/file is not a video/i, '请选择视频文件（mp4 / mov / webm）'],
+  [/shot_ids must contain every shot/i, '镜头列表已变化，请刷新页面后再调整顺序'],
+  // ---- 合成导出（浏览器内）----
+  [/Failed to fetch|NetworkError|fetchFile|403/i, '片段下载失败：素材存储暂不可用或不允许跨域读取，请稍后重试'],
+  [/WebAssembly|wasm|SharedArrayBuffer/i, '当前浏览器不支持浏览器内合成，请换用最新版 Chrome / Edge / Safari'],
   // ---- 上传 ----
   [/Request Entity Too Large|Payload Too Large|FUNCTION_PAYLOAD_TOO_LARGE|\b413\b/i, '图片太大，请换一张 4 MB 以内的图片'],
   [/Unsupported file type|unsupported (image|media) type/i, '不支持的图片格式，请使用 JPG / PNG / WebP'],

@@ -18,6 +18,7 @@ from app.services.script_processing_worker import (
     ExtractTaskExecutor,
     PropInfoTaskExecutor,
     SceneInfoTaskExecutor,
+    ScriptDraftTaskExecutor,
     ScriptOptimizationTaskExecutor,
     ScriptSimplificationTaskExecutor,
 )
@@ -50,6 +51,7 @@ task_executor_registry.register("script_scene_info", SceneInfoTaskExecutor())
 task_executor_registry.register("script_costume_info", CostumeInfoTaskExecutor())
 task_executor_registry.register("script_optimize", ScriptOptimizationTaskExecutor())
 task_executor_registry.register("script_simplify", ScriptSimplificationTaskExecutor())
+task_executor_registry.register("script_draft", ScriptDraftTaskExecutor())
 task_executor_registry.register(
     "video_generation",
     AbstractAsyncDelegatingExecutor(

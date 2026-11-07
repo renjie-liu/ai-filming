@@ -27,6 +27,7 @@ from app.schemas.studio.creator import (
     PreviewGridRequest,
     ShotAudioRead,
     ShotEntityLinksWrite,
+    ShotOrderWrite,
     TaskIdRead,
     TaskIdsRead,
 )
@@ -39,6 +40,7 @@ from app.services.studio.creator_flow import (
     create_chapter_entity,
     generate_character_views,
     generate_preview_grid,
+    reorder_chapter_shots,
     set_entity_shots,
     set_shot_entity_links,
 )
@@ -96,6 +98,24 @@ async def set_entity_shots_api(
         raise _http_error(exc) from exc
     await db.commit()
     return success_response(EntityShotsWrite(shot_ids=shot_ids))
+
+
+@router.put(
+    "/chapters/{chapter_id}/shot-order",
+    response_model=ApiResponse[ShotOrderWrite],
+    summary="创作模式：按给定顺序重排章节镜头（拖拽排序 / 上移下移）",
+)
+async def reorder_chapter_shots_api(
+    chapter_id: str,
+    body: ShotOrderWrite,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[ShotOrderWrite]:
+    try:
+        shot_ids = await reorder_chapter_shots(db, chapter_id=chapter_id, shot_ids=body.shot_ids)
+    except ValueError as exc:
+        raise _http_error(exc) from exc
+    await db.commit()
+    return success_response(ShotOrderWrite(shot_ids=shot_ids))
 
 
 @router.post(

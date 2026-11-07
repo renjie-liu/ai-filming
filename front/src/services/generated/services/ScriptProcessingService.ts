@@ -21,6 +21,7 @@ import type { PropInfoAnalysisRequest } from '../models/PropInfoAnalysisRequest'
 import type { SceneInfoAnalysisRequest } from '../models/SceneInfoAnalysisRequest';
 import type { ScriptConsistencyCheckRequest } from '../models/ScriptConsistencyCheckRequest';
 import type { ScriptDividerRequest } from '../models/ScriptDividerRequest';
+import type { ScriptDraftRequest } from '../models/ScriptDraftRequest';
 import type { ScriptExtractRequest } from '../models/ScriptExtractRequest';
 import type { ScriptOptimizeRequest } from '../models/ScriptOptimizeRequest';
 import type { ScriptSimplifyRequest } from '../models/ScriptSimplifyRequest';
@@ -442,6 +443,27 @@ export class ScriptProcessingService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/simplify-script-async',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 异步按一句话创意起草一集剧本
+     * 创建剧本起草任务并立即返回 task_id；任务结果为 ScriptDraftResult（title / logline / outline / script_text / notes），前端轮询后填入剧本框。
+     * @returns ApiResponse_AsyncTaskCreateRead_ Successful Response
+     * @throws ApiError
+     */
+    public static draftScriptAsyncApiV1ScriptProcessingDraftScriptAsyncPost({
+        requestBody,
+    }: {
+        requestBody: ScriptDraftRequest,
+    }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/script-processing/draft-script-async',
             body: requestBody,
             mediaType: 'application/json',
             errors: {

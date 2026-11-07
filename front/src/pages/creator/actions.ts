@@ -81,6 +81,31 @@ export async function ensureChapter(args: {
   return res.data
 }
 
+export type ScriptDraft = { title: string; logline: string; outline: string[]; script_text: string; notes: string | null }
+
+/**
+ * 一句话起草剧本：创建起草任务 → 轮询 → 返回标题 / 梗概 / 大纲 / 正文。
+ * 正文格式与「一键拆分镜」期望的一致（场景行、动作句、「角色：台词」），用户改完即可拆分镜。
+ */
+export async function draftScript(args: { projectId: string; chapterId: string | null; idea: string; targetSeconds: number; context?: string | null }): Promise<ScriptDraft> {
+  const res = await ScriptProcessingService.draftScriptAsyncApiV1ScriptProcessingDraftScriptAsyncPost({
+    requestBody: { project_id: args.projectId, chapter_id: args.chapterId, idea: args.idea.trim(), target_seconds: args.targetSeconds, context: args.context ?? null },
+  })
+  const taskId = res.data?.task_id
+  if (!taskId) throw new Error(res.message || '起草任务创建失败')
+  const settled = await pollTask(taskId)
+  assertSucceeded(settled, '剧本起草失败')
+  const result = (settled.result ?? {}) as Partial<ScriptDraft>
+  const scriptText = (result.script_text ?? '').trim()
+  if (!scriptText) throw new Error('AI 没有写出剧本正文，请换个说法再试')
+  return { title: result.title ?? '', logline: result.logline ?? '', outline: result.outline ?? [], script_text: scriptText, notes: result.notes ?? null }
+}
+
+/** 按新顺序重排章节镜头（拖拽排序 / 上移下移）。 */
+export async function reorderShots(chapterId: string, shotIds: string[]): Promise<void> {
+  await StudioCreatorService.reorderChapterShotsApiApiV1StudioCreatorChaptersChapterIdShotOrderPut({ chapterId, requestBody: { shot_ids: shotIds } })
+}
+
 /** 清空章节镜头（重新拆分镜前使用）。 */
 export async function clearChapterShots(chapterId: string): Promise<void> {
   const shots = await listChapterShots(chapterId)

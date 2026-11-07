@@ -16,6 +16,7 @@ from app.chains.agents import (
     CostumeInfoAnalysisAgent,
     PropInfoAnalysisAgent,
     SceneInfoAnalysisAgent,
+    ScriptDrafterAgent,
     ScriptOptimizerAgent,
     ScriptSimplifierAgent,
 )
@@ -25,6 +26,7 @@ from app.chains.agents.script_processing_agents import (
     ScriptOptimizationResult,
     ScriptSimplificationResult,
 )
+from app.schemas.skills.script_processing import ScriptDraftResult
 from app.core.db_sync import sync_session_maker
 from app.services.script_extraction_cache import (
     build_script_extract_cache_key,
@@ -146,6 +148,23 @@ class ScriptSimplificationResultGenerator(AbstractLLMResultGenerator):
         return agent.extract(script_text=str(run_args.get("script_text") or ""))
 
 
+class ScriptDraftResultGenerator(AbstractLLMResultGenerator):
+    """一句话起草剧本：创意 + 作品设定 → ScriptDraftResult（标题 / 梗概 / 大纲 / 正文）。"""
+
+    thinking = True
+
+    def generate_with_llm(self, llm, run_args: dict[str, Any]) -> ScriptDraftResult:
+        agent = ScriptDrafterAgent(llm)
+        return agent.draft(
+            idea=str(run_args.get("idea") or ""),
+            style=str(run_args.get("style") or ""),
+            visual_style=str(run_args.get("visual_style") or ""),
+            target_seconds=int(run_args.get("target_seconds") or 60),
+            episode_index=int(run_args.get("episode_index") or 1),
+            context=run_args.get("context"),
+        )
+
+
 class DivideTaskExecutor(AbstractWorkerTaskExecutor):
     task_kind = "script_divide"
     timeout_seconds = 1800.0
@@ -250,6 +269,11 @@ class ScriptSimplificationTaskExecutor(_SimpleLLMTaskExecutor):
     generator_class = ScriptSimplificationResultGenerator
 
 
+class ScriptDraftTaskExecutor(_SimpleLLMTaskExecutor):
+    task_kind = "script_draft"
+    generator_class = ScriptDraftResultGenerator
+
+
 def generate_division_result(
     *,
     db: Session,
@@ -352,3 +376,7 @@ def run_script_optimization_task_sync(task_id: str) -> None:
 
 def run_script_simplification_task_sync(task_id: str) -> None:
     ScriptSimplificationTaskExecutor().run(task_id)
+
+
+def run_script_draft_task_sync(task_id: str) -> None:
+    ScriptDraftTaskExecutor().run(task_id)

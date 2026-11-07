@@ -30,6 +30,7 @@ CreatorPage
 
 | 步骤 | 用户操作 | 后端调用（均为 OpenAPI generated client） |
 | --- | --- | --- |
+| ① 剧本 | 一句话起草剧本 | `POST script-processing/draft-script-async`（`project_id` / 可选 `chapter_id` / `idea` / `target_seconds`）→ 轮询 → 任务结果 `ScriptDraftResult{title, logline, outline, script_text, notes}` 填进剧本框（`draftScript`）；只写文本，不动已有镜头 |
 | ① 剧本 | 一键拆分镜 | `ensureChapter`（创建 / 更新章节 raw_text）→ `divide-async(write_to_db)` → 轮询 → `extract-async(script_division)` → 轮询 → `POST chapters/{id}/auto-confirm` |
 | ① 剧本 | 重新拆分镜 | 先逐个 `DELETE shots/{id}`，再执行上面的链 |
 | ② 角色场景 | 生成形象 / 换一张 | 角色：`render-prompt` / `image-tasks` 允许 `image_id` 为空，按角色级任务（`relation_type=character`）执行，完成后由执行器创建首张正面 `CharacterImage`；场景 / 道具 / 服装：无槽位时先 `POST entities/{type}/{id}/images`，再 `render-prompt` → `image-tasks` |
@@ -46,10 +47,12 @@ CreatorPage
 | ③ 分镜 | 预演四宫格 | 抽屉「生成四宫格」先写回节拍 / 镜头语言，再 `POST creator/shots/{id}/preview-grid`（`ratio` = 作品比例）→ 一个图片任务，提示词由 `build_preview_grid_prompt` 按前四条动作节拍 + 镜头语言 + 风格 + 场景 / 角色拼成「2×2 四格连续分镜」，参考图 = 关联实体形象图；结果落在 `ShotFrameImage(key)`，聚合为 `preview_grid_url` / `preview_grid_task`（不计入关键帧数） |
 | ③ 分镜 | 编辑 | `PATCH shots/{id}`（标题）、`PATCH shot-details/{id}`（`first_frame_prompt`、`duration`、`camera_shot`、`angle`、`movement`、`action_beats`）、`PUT creator/shots/{id}/links`（画面里会用到的角色 / 场景 / 道具）、`shot-dialog-lines` 增删改（对白；新行序号接在现有行之后） |
 | ③ 分镜 | 增删镜头 | `POST shots` + `auto-confirm`、`DELETE shots/{id}` |
+| ③ 分镜 | 调整顺序 | 桌面端拖动卡片（HTML5 drag & drop，`reorderIds` 算新顺序）或抽屉里「上移 / 下移」→ `PUT creator/chapters/{cid}/shot-order`（整张顺序表）→ `refresh()` |
 | ④ 视频 | 开始生成 / 重试 | 每镜 `preview-prompt` → `POST film/tasks/video`。参考方式由 `videoPlan.ts` 按素材自动选：有角色 / 场景形象图 → `reference_mode=reference`（全能参考：形象图 + 关键帧，1–9 张 `images`，`reference_labels` 与之一一对应，提示词开头按 `[Image n]` 点名）；只有关键帧 → `first`；都没有 → `text_only`。Seedance 会拒绝含真人形象的参考图（`InputImageSensitiveContentDetected.PrivacyInformation`，写实风格的 AI 人像也会触发），此时重试按钮改为「改用文字描述重试」并以 `text_only` 重新提交 |
 | ④ 视频 | 调整（抽屉） | 参考方式 Segmented（形象参考 / 首帧图 / 仅文字）+ 参考素材勾选（勾选顺序 = `[Image n]`；角色的侧面 / 背面视图紧跟其正面之后列出，标「同一人」）+ 最终提示词可编辑（改过则按改过的文本提交，后端只补参考块不重写）；「上传自己的视频」→ `uploadVideo`（见下）→ `POST creator/shots/{id}/video-from-file` 设为成片 |
 | ④ 视频 | 配音 / 配乐参考 | 「上传配音 / 配乐」→ `uploadMedia`（与视频同一条直传路径，`usage_kind=reference_audio`）→ `POST creator/shots/{id}/audio-from-file`；镜头有音频时确认单标「+ 音频」，预览 / 提交都带 `audio_file_id`，提示词参考块多一行 `[Audio 1] 配音 / 配乐参考…`，payload 多一项 `role=reference_audio`（公网 URL）；「移除」→ `DELETE creator/shots/{id}/audio` |
 | ⑤ 成片 | 连播 / 下载 | 直接使用 `creator-board` 返回的 `video_url`（对象存储公网地址或 `/files/{id}/download`） |
+| ⑤ 成片 | 合成导出 | 纯前端（`pages/creator/exportEpisode.ts`）：ffmpeg.wasm 内核从本站 `/ffmpeg/`（构建时由 `vite-plugin-static-copy` 从 `@ffmpeg/core/dist/esm` 复制，约 31 MB；必须用 ESM 版，Vite 把 `@ffmpeg/ffmpeg` 的 worker 打成 module worker，`importScripts` 不可用）加载 → `fetchFile` 逐段下载（Vercel Blob 带 `access-control-allow-origin: *`）→ `concat` demuxer `-c copy` 拼接（参数不一致时退回 libx264 重编码）→ 浏览器下载 `<作品>-第N集.mp4`。「字幕 .srt」按镜头时长把各镜对白平均分配时间码（`buildSrt`），不烧进视频 |
 
 已在线验证（2026-11-07）：拆分镜 8 s（4 镜）→ 识别 41 s → 自动确认 → 4 张角色形象 → 4 张关键帧 → 4 段视频（1 段首帧参考 + 3 段因真人参考被拒后改文字）全部成功，耗时约 5 分钟。
 
@@ -97,6 +100,12 @@ CreatorPage
 - `generate_character_views(character_id, views)`：要求已有正面形象（否则 `CreatorInputError`）；以角色级提示词（`build_character_image_base_draft` + `derive_asset_image_preview`）加「视角要求：…与参考图是同一个人」为提示词、正面图为参考图，每个视角一个 `create_image_task_and_link(relation_type=character_image, purpose=character_view)`，槽位为对应 `view_angle` 的 `CharacterImage`（`file_id` 可空，已有则复用）。
 - `generate_preview_grid(shot_id, ratio)`：`build_shot_video_prompt_pack` → `build_preview_grid_prompt`；参考图 = `get_shot_assets_overview` 里已关联且有图的实体；复用 `generation/frame` 的 base / context / submission 组装；槽位 `ShotFrameImage(key)`；任务 `purpose=storyboard_preview`，默认 `1:1`。
 - `attach_shot_audio(shot_id, file_id | None)`：删掉镜头已有的 `reference_audio` 用途记录；传入文件必须是 `FileType.audio`，再写一条 `sync_usage_from_shot_context(usage_kind=reference_audio)`；`None` 即清除。
+- `reorder_chapter_shots(chapter_id, shot_ids)`：`shot_ids` 必须恰好是本章节全部镜头各一次（否则 `CreatorInputError`）；序号在章节内唯一（`uq_shots_chapter_index`），先全部写成负数再按新顺序写 1..n，两次 flush，避免中途撞唯一约束。
+
+### 一句话起草剧本（`app/chains/agents/script_drafter_agent.py` + `script_processing_tasks.py` / `script_processing_worker.py`）
+
+- `ScriptDrafterAgent`：系统提示词规定输出格式与分镜 / 提取 Agent 的期望一致（首行 `【第N集】标题`、「地点，时间。」场景行、角色首次出场括号里写外貌服装、「角色名：台词」一行一句、动作只写看得见的事、按目标时长控制篇幅），输出 `ScriptDraftResult`；`_normalize` 兼容包裹层、`script` 等别名字段与字符串大纲。
+- 任务：`task_kind=script_draft`、`relation_type=script_draft`、关联到章节（无章节时关联作品）；`create_script_draft_task` 在创建时把作品 `style` / `visual_style` 与章节集数放进 `run_args`，worker（`ScriptDraftTaskExecutor`，thinking 模型）不再回查；同一关联上有活动任务时复用。结果只放在任务 `result` 里，由前端填入剧本框，不写章节 `raw_text`（用户改完点拆分镜时才写）。
 - `build_projects_overview`：作品列表计数与封面。
 
 ### 视频生成（`app/services/film/generated_video.py` + `generation/video/build_context.py`）
@@ -115,6 +124,12 @@ CreatorPage
 - `app/api/v1/routes/studio/projects.py`：`GET /overview`。
 - `app/api/v1/routes/studio/creator.py`（前缀 `/studio/creator`）：`PUT /shots/{id}/links`、`PUT /chapters/{cid}/entities/{type}/{id}/shots`、`POST /chapters/{cid}/entities`、`POST /entities/{type}/{id}/image-from-file`、`POST /shots/{id}/keyframe-from-file`、`POST /shots/{id}/video-from-file`、`POST /entities/character/{id}/views`（→ `task_ids`）、`POST /shots/{id}/preview-grid`（→ `task_id`）、`POST /shots/{id}/audio-from-file`、`DELETE /shots/{id}/audio`。service 抛 `CreatorInputError` → 400，其它 `ValueError`（not found）→ 404。
 - `app/api/v1/routes/film/video_request.py`：`VideoGenerationTaskRequest` 增加 `audio_file_id`；`preview-prompt` 与 `tasks/video` 都接收。
+- `app/api/v1/routes/script_processing.py`：`POST /draft-script-async`（`ScriptDraftRequest`，`idea` 2–2000 字、`target_seconds` 15–600）→ `AsyncTaskCreateRead`。
+- `app/api/v1/routes/studio/creator.py` 另有 `PUT /chapters/{cid}/shot-order`（`ShotOrderWrite{shot_ids}`）。
+
+### 部署路由（`vercel.json`）
+
+Vercel Services 下静态 `web` 服务不会自己做 SPA 回退，`destination.path` 与服务级 `request.path` transform 都不改变静态文件查找；因此第一条顶层 rewrite 把所有非 `/api/`、非文档、非静态资源（`/assets/`、`env.js`、`logo.svg`、`mockServiceWorker.js`）的路径改写为 `/index.html`，再经 `/(.*)` → `web` 服务命中。直接打开 / 刷新 `/works`、`/works/:id`、`/models` 都能加载应用。
 
 读模型（`app/schemas/studio/creator.py`）使用 `json_schema_serialization_defaults_required=True`，带默认值的字段在响应 schema 中仍为必填，前端类型不再到处可选。
 

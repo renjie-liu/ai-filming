@@ -1020,6 +1020,29 @@ async def generate_preview_grid(db: AsyncSession, *, shot_id: str, ratio: str | 
     )
 
 
+async def reorder_chapter_shots(db: AsyncSession, *, chapter_id: str, shot_ids: list[str]) -> list[str]:
+    """按给定顺序重排章节镜头的序号（index 从 1 开始）。
+
+    为什么存在：分镜板拖拽排序 / 上移下移。序号在章节内唯一（`uq_shots_chapter_index`），
+    所以分两步写：先全部改成负数占位，再按新顺序写正数，避免中途撞唯一约束。
+    shot_ids 必须恰好包含本章节的全部镜头各一次。
+    """
+    if await db.get(Chapter, chapter_id) is None:
+        raise ValueError(entity_not_found("Chapter"))
+    shots = list((await db.execute(select(Shot).where(Shot.chapter_id == chapter_id))).scalars().all())
+    by_id = {s.id: s for s in shots}
+    wanted = [str(item).strip() for item in shot_ids]
+    if len(wanted) != len(set(wanted)) or set(wanted) != set(by_id):
+        raise CreatorInputError("shot_ids must contain every shot of the chapter exactly once")
+    for position, shot_id in enumerate(wanted, start=1):
+        by_id[shot_id].index = -position
+    await db.flush()
+    for position, shot_id in enumerate(wanted, start=1):
+        by_id[shot_id].index = position
+    await db.flush()
+    return wanted
+
+
 async def attach_shot_audio(db: AsyncSession, *, shot_id: str, file_id: str | None) -> str | None:
     """设置 / 清除镜头的配音或配乐参考：记录为 reference_audio 用途（镜头本身没有音频字段，用途表即是关联）。"""
     shot = await db.get(Shot, shot_id)

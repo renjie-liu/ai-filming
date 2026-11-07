@@ -1,16 +1,23 @@
 import type React from 'react';
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Input, Popconfirm, Segmented, Tag, message } from 'antd'
+import { Alert, Button, Card, Input, Popconfirm, Segmented, Select, Tag, message } from 'antd'
 import { CheckCircleFilled, LoadingOutlined } from '@ant-design/icons'
 import type { ChapterRead, CreatorBoardRead, ProjectRead } from '../../../services/generated'
 import { StudioProjectsService } from '../../../services/generated'
 import { localizeErrorMessage } from '../../../utils/errorMessage'
-import { clearChapterShots, ensureChapter, prepareChapter, type PrepareStage, type PrepareStageState } from '../actions'
+import { clearChapterShots, draftScript, ensureChapter, prepareChapter, type PrepareStage, type PrepareStageState, type ScriptDraft } from '../actions'
 
 /**
- * 第 1 步 · 剧本：粘贴剧本 → 一键拆分镜。
+ * 第 1 步 · 剧本：粘贴剧本（或一句话让 AI 起草）→ 一键拆分镜。
  * 已拆过镜的章节显示摘要，并允许清空后重新拆分。
  */
+
+const DRAFT_LENGTH_OPTIONS = [
+  { value: 30, label: '约 30 秒' },
+  { value: 60, label: '约 1 分钟' },
+  { value: 120, label: '约 2 分钟' },
+  { value: 180, label: '约 3 分钟' },
+]
 
 const STAGE_LABELS: Array<{ key: PrepareStage; label: string }> = [
   { key: 'divide', label: '拆分镜头' },
@@ -51,9 +58,14 @@ const ScriptStep: React.FC<Props> = ({ projectId, project, chapters, chapter, bo
   })
   const [log, setLog] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [idea, setIdea] = useState('')
+  const [draftSeconds, setDraftSeconds] = useState(60)
+  const [drafting, setDrafting] = useState(false)
+  const [draft, setDraft] = useState<ScriptDraft | null>(null)
 
   useEffect(() => {
     setText(chapter?.raw_text ?? '')
+    setDraft(null)
   }, [chapter?.id, chapter?.raw_text])
   useEffect(() => {
     if (board?.project.default_video_ratio) setRatio(board.project.default_video_ratio)
@@ -95,6 +107,27 @@ const ScriptStep: React.FC<Props> = ({ projectId, project, chapters, chapter, bo
 
   if (triggerRef) triggerRef.current = () => void run(hasShots)
 
+  /** 一句话 → 一集剧本：写进输入框，用户改好后再拆分镜；不会动已有镜头。 */
+  const runDraft = async () => {
+    const trimmed = idea.trim()
+    if (trimmed.length < 2) {
+      message.warning('先写一句故事想法，比如「孙悟空退休后在花果山开民宿」')
+      return
+    }
+    setDrafting(true)
+    setError(null)
+    try {
+      const result = await draftScript({ projectId, chapterId: chapter?.id ?? null, idea: trimmed, targetSeconds: draftSeconds })
+      setText(result.script_text)
+      setDraft(result)
+      message.success(result.title ? `已起草「${result.title}」，改好后点「一键拆分镜」` : '剧本已起草，改好后点「一键拆分镜」')
+    } catch (e) {
+      message.error(localizeErrorMessage(e instanceof Error ? e.message : String(e), '剧本起草失败，请稍后重试'))
+    } finally {
+      setDrafting(false)
+    }
+  }
+
   const changeRatio = async (value: string) => {
     setRatio(value)
     try {
@@ -130,6 +163,43 @@ const ScriptStep: React.FC<Props> = ({ projectId, project, chapters, chapter, bo
       )}
       <Card>
         <div className="flex flex-col gap-4">
+          {/* 没有剧本：一句话让 AI 起草 */}
+          <div className="flex flex-col gap-2 bg-gray-50 rounded-lg p-3">
+            <span className="text-sm font-medium">没有剧本？写一句话，让 AI 先起草一集</span>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                id="creator-idea"
+                value={idea}
+                onChange={(e) => setIdea(e.target.value)}
+                onPressEnter={() => void runDraft()}
+                placeholder="例如：孙悟空退休后回花果山开民宿，第一位客人是唐僧"
+                maxLength={500}
+                disabled={running || drafting}
+                className="flex-1"
+              />
+              <Select id="creator-draft-length" value={draftSeconds} onChange={(v) => setDraftSeconds(Number(v))} options={DRAFT_LENGTH_OPTIONS} className="w-32" disabled={running || drafting} />
+              <Button type="default" loading={drafting} disabled={running} onClick={() => void runDraft()}>
+                AI 起草剧本
+              </Button>
+            </div>
+            <span className="text-xs text-gray-400">按作品的题材与画面风格写，含场景、角色外貌与对白；约 20–60 秒，只分析文字不扣生成额度。起草结果会填进下面的输入框，可以随意修改。</span>
+          </div>
+          {draft && (
+            <Alert
+              type="info"
+              showIcon
+              closable
+              onClose={() => setDraft(null)}
+              message={draft.title ? `《${draft.title}》${draft.logline ? ` · ${draft.logline}` : ''}` : draft.logline || '已起草'}
+              description={
+                draft.outline.length > 0 ? (
+                  <ol className="m-0 pl-5 text-[13px]">
+                    {draft.outline.map((line, i) => <li key={i}>{line}</li>)}
+                  </ol>
+                ) : draft.notes
+              }
+            />
+          )}
           <Input.TextArea
             id="creator-script"
             value={text}

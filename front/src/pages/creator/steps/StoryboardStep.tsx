@@ -1,7 +1,7 @@
 import type React from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { Button, Card, Drawer, Empty, Input, InputNumber, Popconfirm, Select, Tag, message } from 'antd'
-import { DeleteOutlined } from '@ant-design/icons'
+import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined } from '@ant-design/icons'
 import type { CreatorBoardRead, CreatorEntityRead, CreatorShotRead } from '../../../services/generated'
 import { useIsMobile } from '../../../hooks/useIsMobile'
 import { localizeErrorMessage } from '../../../utils/errorMessage'
@@ -12,6 +12,7 @@ import {
   generateKeyframe,
   generatePreviewGrid,
   linkedEntities,
+  reorderShots,
   resolveRatio,
   rewriteShotDescription,
   saveDialogue,
@@ -31,7 +32,20 @@ import { isActiveStatus } from '../taskPolling'
  * 卡片可生成 / 重画关键帧；抽屉里可以在历史候选里挑一张关键帧 / 回退、改标题、景别、机位、运镜、动作节拍、
  * 画面描述（AI 改写）、时长、画面里会用到的角色 / 场景 / 道具、对白，也可以上传自己的图当关键帧，
  * 并在生视频前先出一张「预演四宫格」（2×2 图演四个节拍）检查节奏与连续性。
+ * 镜头顺序：桌面端直接拖卡片；抽屉里的「上移 / 下移」在手机上也能用。
  */
+
+/** 把 dragged 移到 target 的位置（target 之前），返回新的 id 顺序。 */
+export function reorderIds(ids: string[], dragged: string, target: string): string[] {
+  if (dragged === target || !ids.includes(dragged) || !ids.includes(target)) return ids
+  const without = ids.filter((id) => id !== dragged)
+  const at = without.indexOf(target)
+  const from = ids.indexOf(dragged)
+  const to = ids.indexOf(target)
+  // 往后拖放到目标之后，往前拖放到目标之前，符合直觉
+  without.splice(from < to ? at + 1 : at, 0, dragged)
+  return without
+}
 
 type Props = {
   board: CreatorBoardRead
@@ -153,6 +167,9 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
   const [generating, setGenerating] = useState(false)
   const [gridRunning, setGridRunning] = useState(false)
   const [batchRunning, setBatchRunning] = useState(false)
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+  const [reordering, setReordering] = useState(false)
   const ratio = resolveRatio(board)
   const characters = useMemo(() => board.entities.filter((e) => e.type === 'character'), [board.entities])
 
@@ -290,6 +307,37 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
       message.error(errText(e, '删除失败'))
     }
   }
+  /** 提交新的镜头顺序；失败时聚合不变，页面回到原顺序。 */
+  const applyOrder = async (ids: string[]) => {
+    const current = board.shots.map((s) => s.id)
+    if (ids.join() === current.join()) return
+    setReordering(true)
+    try {
+      await reorderShots(board.chapter.id, ids)
+      await onChanged()
+    } catch (e) {
+      message.error(errText(e, '调整顺序失败'))
+    } finally {
+      setReordering(false)
+    }
+  }
+  const drop = async (targetId: string) => {
+    const dragged = dragId
+    setDragId(null)
+    setOverId(null)
+    if (!dragged) return
+    await applyOrder(reorderIds(board.shots.map((s) => s.id), dragged, targetId))
+  }
+  const move = async (shot: CreatorShotRead, delta: -1 | 1) => {
+    const ids = board.shots.map((s) => s.id)
+    const from = ids.indexOf(shot.id)
+    const to = from + delta
+    if (from < 0 || to < 0 || to >= ids.length) return
+    const next = [...ids]
+    next.splice(from, 1)
+    next.splice(to, 0, shot.id)
+    await applyOrder(next)
+  }
   const add = async () => {
     const index = board.shots.reduce((m, s) => Math.max(m, s.index), 0) + 1
     try {
@@ -313,7 +361,7 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
         <div>
           <h1 className="text-xl font-bold m-0">分镜板</h1>
           <p className="text-gray-500 text-sm m-0 mt-1 max-w-[64ch]">
-            {board.summary.shot_count} 个镜头 · 共 {board.summary.total_seconds} 秒 · 点镜头卡可以改画面描述、景别运镜、对白和画面里的人物场景，也能上传自己的关键帧。
+            {board.summary.shot_count} 个镜头 · 共 {board.summary.total_seconds} 秒 · 点镜头卡可以改画面描述、景别运镜、对白和画面里的人物场景，也能上传自己的关键帧；拖动卡片可以调整镜头顺序。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -327,9 +375,37 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
       {board.shots.length === 0 ? (
         <Empty description="还没有镜头，先回到「剧本」一键拆分镜" />
       ) : (
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div className={`grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 ${reordering ? 'opacity-60 pointer-events-none' : ''}`} data-testid="shot-grid">
           {board.shots.map((s) => (
-            <ShotCard key={s.id} shot={s} board={board} onEdit={() => setEditingId(s.id)} onGenerate={() => generate(s)} />
+            <div
+              key={s.id}
+              draggable
+              data-shot-id={s.id}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.setData('text/plain', s.id)
+                setDragId(s.id)
+              }}
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+                if (overId !== s.id) setOverId(s.id)
+              }}
+              onDragLeave={() => {
+                if (overId === s.id) setOverId(null)
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                void drop(s.id)
+              }}
+              onDragEnd={() => {
+                setDragId(null)
+                setOverId(null)
+              }}
+              className={`rounded-lg transition-shadow ${dragId === s.id ? 'opacity-40' : ''} ${overId === s.id && dragId && dragId !== s.id ? 'ring-2 ring-blue-500' : ''}`}
+            >
+              <ShotCard shot={s} board={board} onEdit={() => setEditingId(s.id)} onGenerate={() => generate(s)} />
+            </div>
           ))}
         </div>
       )}
@@ -454,6 +530,14 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
                 <div className="text-sm bg-gray-50 rounded p-2 whitespace-pre-wrap">{editing.script_excerpt}</div>
               </div>
             )}
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-gray-500">顺序 · 第 {board.shots.findIndex((s) => s.id === editing.id) + 1} / {board.shots.length} 个</span>
+              <div className="flex gap-2">
+                <Button size="small" icon={<ArrowUpOutlined />} disabled={reordering || board.shots[0]?.id === editing.id} onClick={() => void move(editing, -1)}>上移</Button>
+                <Button size="small" icon={<ArrowDownOutlined />} disabled={reordering || board.shots[board.shots.length - 1]?.id === editing.id} onClick={() => void move(editing, 1)}>下移</Button>
+                <span className="text-xs text-gray-400 self-center">桌面端也可以直接拖动卡片</span>
+              </div>
+            </div>
             <div className="flex gap-2 flex-wrap">
               <Button type="primary" loading={saving} onClick={() => void save()}>保存</Button>
               <Button onClick={() => setEditingId(null)}>取消</Button>

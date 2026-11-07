@@ -76,6 +76,7 @@ export type { ApiResponse_ShotCharacterLinkRead_ } from './models/ApiResponse_Sh
 export type { ApiResponse_ShotDetailRead_ } from './models/ApiResponse_ShotDetailRead_';
 export type { ApiResponse_ShotDialogLineRead_ } from './models/ApiResponse_ShotDialogLineRead_';
 export type { ApiResponse_ShotFrameImageRead_ } from './models/ApiResponse_ShotFrameImageRead_';
+export type { ApiResponse_ShotOrderWrite_ } from './models/ApiResponse_ShotOrderWrite_';
 export type { ApiResponse_ShotPreparationMutationResultRead_ } from './models/ApiResponse_ShotPreparationMutationResultRead_';
 export type { ApiResponse_ShotPreparationStateRead_ } from './models/ApiResponse_ShotPreparationStateRead_';
 export type { ApiResponse_ShotRead_ } from './models/ApiResponse_ShotRead_';
@@ -209,6 +210,7 @@ export type { ScriptConsistencyCheckResult } from './models/ScriptConsistencyChe
 export type { ScriptConsistencyIssue } from './models/ScriptConsistencyIssue';
 export type { ScriptDividerRequest } from './models/ScriptDividerRequest';
 export type { ScriptDivisionResult } from './models/ScriptDivisionResult';
+export type { ScriptDraftRequest } from './models/ScriptDraftRequest';
 export type { ScriptExtractRequest } from './models/ScriptExtractRequest';
 export type { ScriptOptimizationResult } from './models/ScriptOptimizationResult';
 export type { ScriptOptimizeRequest } from './models/ScriptOptimizeRequest';
@@ -249,6 +251,7 @@ export type { ShotFramePromptRenderRequest } from './models/ShotFramePromptRende
 export type { ShotFramePromptRequest } from './models/ShotFramePromptRequest';
 export type { ShotFrameType } from './models/ShotFrameType';
 export type { ShotLinkedAssetItem } from './models/ShotLinkedAssetItem';
+export type { ShotOrderWrite } from './models/ShotOrderWrite';
 export type { ShotPreparationLinkEntityType } from './models/ShotPreparationLinkEntityType';
 export type { ShotPreparationLinkRequest } from './models/ShotPreparationLinkRequest';
 export type { ShotPreparationMutationAction } from './models/ShotPreparationMutationAction';

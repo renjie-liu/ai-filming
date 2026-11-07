@@ -235,6 +235,18 @@ class ScriptSimplificationResult(BaseModel):
     simplification_summary: str = Field(..., description="精简策略摘要（说明删改原则）")
 
 
+class ScriptDraftResult(BaseModel):
+    """一句话起草剧本的输出：标题、一句话梗概、分段大纲与可直接拆分镜的剧本正文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field("", description="本集标题")
+    logline: str = Field("", description="一句话梗概")
+    outline: List[str] = Field(default_factory=list, description="分段大纲（3–6 条，按时间顺序）")
+    script_text: str = Field(..., description="剧本正文：场景行 / 动作句 / 「角色：台词」，可直接用于一键拆分镜")
+    notes: Optional[str] = Field(None, description="给创作者的提示（可选）")
+
+
 class ScriptShotExtraction(BaseModel):
     """单镜提取结果（最终输出用，引用全局实体稳定ID）。"""
 
@@ -485,6 +497,7 @@ __all__ = [
     "ScriptConsistencyCheckResult",
     "ScriptOptimizationResult",
     "ScriptSimplificationResult",
+    "ScriptDraftResult",
     "ScriptShotExtraction",
     "ScriptExtractionResult",
     "StudioAssetDraft",
