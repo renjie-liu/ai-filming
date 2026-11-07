@@ -144,15 +144,29 @@ project was used up (board polling every 3 s while tasks run adds up).
 
 Fixes, pick one:
 
-1. Upgrade the Neon project (Vercel dashboard → Storage → the Neon database →
-   Open in Neon → Billing); connections resume immediately.
-2. Wait for the monthly reset.
-3. Point `DATABASE_URL` at another Postgres (any provider) and redeploy; tables
-   are created on first start by `ensure_bootstrapped`, but existing works are
-   not migrated automatically.
+1. **Create a second Neon database on the same free installation** (the free
+   plan's 100 CU-hours are *per Neon project*, so a new one starts with a fresh
+   allowance): Vercel dashboard → Storage → Create Database → Neon → connect to
+   `ai-filming`, then disconnect the exhausted one and redeploy. Via the REST API
+   (what was done on 2026-11-07):
+   `POST /v1/integrations/billing/authorization` (plan `free_v3`, product
+   `neon`) → `POST /v1/storage/stores/integration` with the `authorizationId` →
+   `DELETE /v1/storage/stores/{old}/connections/{spc_…}` →
+   `POST /v1/storage/stores/{new}/connections` `{projectId, envVarEnvironments}`
+   → push or redeploy. The new database starts empty: tables, prompts and the
+   Ark provider are recreated by `ensure_bootstrapped` on first start, works are
+   not migrated (the old project stays readable once its quota resets).
+2. Upgrade the Neon installation (Launch plan, pay per CU-hour); connections
+   resume immediately and the data is kept.
+3. Wait for the monthly reset.
+4. Point `DATABASE_URL` at another Postgres (any provider) and redeploy.
 
-Reduce usage: the board only polls while a task is running; close creator tabs
-you are not using, and avoid leaving the video step open for long batches.
+Reduce usage: Neon bills compute while the endpoint is awake and suspends it
+after 5 idle minutes, so what matters is how often the app wakes it. The
+creator board polls only while a task is running, and the task center polls
+every 4 s only while something is pending / running, once a minute when idle,
+and not at all while the tab is hidden. Still, close creator tabs you are not
+using.
 
 ## Troubleshooting: `/ffmpeg/*` or other static files return the SPA HTML
 
