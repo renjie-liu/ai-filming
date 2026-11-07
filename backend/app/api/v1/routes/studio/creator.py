@@ -100,13 +100,13 @@ async def create_chapter_entity_api(
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[CreatorEntityCreatedRead]:
     try:
-        entity_id = await create_chapter_entity(
+        entity_id, reused = await create_chapter_entity(
             db, chapter_id=chapter_id, entity_type=body.type, name=body.name, description=body.description, shot_ids=body.shot_ids
         )
     except ValueError as exc:
         raise _http_error(exc) from exc
     await db.commit()
-    return created_response(CreatorEntityCreatedRead(type=body.type, id=entity_id))
+    return created_response(CreatorEntityCreatedRead(type=body.type, id=entity_id, reused=reused))
 
 
 @router.post(

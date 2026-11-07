@@ -285,9 +285,9 @@ const AddEntityModal: React.FC<{
     }
     setCreating(true)
     try {
-      await createEntity({ chapterId: board.chapter.id, type, name, description, shotIds })
+      const { reused } = await createEntity({ chapterId: board.chapter.id, type, name, description, shotIds })
       await onCreated()
-      message.success(`已新增${ENTITY_TYPE_LABEL[type]}「${name.trim()}」，点卡片可以生成形象`)
+      message.success(reused ? `已有同名${ENTITY_TYPE_LABEL[type]}「${name.trim()}」，已沿用并关联到所选镜头` : `已新增${ENTITY_TYPE_LABEL[type]}「${name.trim()}」，点卡片可以生成形象`)
       onClose()
     } catch (e) {
       message.error(errText(e, '新增失败'))

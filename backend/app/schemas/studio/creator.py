@@ -162,6 +162,7 @@ class FileAttachRequest(BaseModel):
 class CreatorEntityCreatedRead(_ReadModel):
     type: str
     id: str
+    reused: bool = Field(False, description="同名实体已存在（角色按作品、场景 / 道具 / 服装全局唯一），本次沿用而非新建")
 
 
 class AttachedImageRead(_ReadModel):

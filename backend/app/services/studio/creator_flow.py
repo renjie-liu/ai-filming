@@ -647,29 +647,46 @@ async def set_entity_shots(db: AsyncSession, *, chapter_id: str, entity_type: st
     return result
 
 
-async def create_chapter_entity(db: AsyncSession, *, chapter_id: str, entity_type: str, name: str, description: str, shot_ids: list[str]) -> str:
-    """创作页手动新增角色 / 场景 / 道具 / 服装（沿用作品的题材 / 画面风格），并挂到指定镜头。返回实体 ID。"""
+async def create_chapter_entity(
+    db: AsyncSession, *, chapter_id: str, entity_type: str, name: str, description: str, shot_ids: list[str]
+) -> tuple[str, bool]:
+    """创作页手动新增角色 / 场景 / 道具 / 服装（沿用作品的题材 / 画面风格），并挂到指定镜头。
+
+    名称唯一规则与自动确认一致：角色按作品唯一，场景 / 道具 / 服装全局唯一（表上有 uq_*_name）。
+    同名已存在时沿用它（补空描述、关联到本作品与镜头），而不是报错。返回 (实体 ID, 是否沿用)。
+    """
     et = _require_entity_type(entity_type)
     chapter, project = await _load_chapter_scope(db, chapter_id=chapter_id)
     clean_name = (name or "").strip()
     if not clean_name:
         raise CreatorInputError("name is required")
-    payload = await create_entity(
-        db,
-        entity_type=et,
-        body={
-            "id": uuid.uuid4().hex,
-            "name": clean_name,
-            "description": description or "",
-            "style": _enum_value(project.style),
-            "visual_style": _enum_value(project.visual_style),
-            "project_id": project.id,
-            "chapter_id": chapter.id,
-        },
+    existing = (
+        await _find_character(db, project_id=project.id, name=clean_name)
+        if et == "character"
+        else (await _find_asset(db, entity_type=et, project_id=project.id, name=clean_name))[0]
     )
-    entity_id = str(payload["id"])
+    if existing is not None:
+        entity_id = str(existing.id)
+        if description and not (existing.description or "").strip():
+            existing.description = description
+            await db.flush()
+    else:
+        payload = await create_entity(
+            db,
+            entity_type=et,
+            body={
+                "id": uuid.uuid4().hex,
+                "name": clean_name,
+                "description": description or "",
+                "style": _enum_value(project.style),
+                "visual_style": _enum_value(project.visual_style),
+                "project_id": project.id,
+                "chapter_id": chapter.id,
+            },
+        )
+        entity_id = str(payload["id"])
     await set_entity_shots(db, chapter_id=chapter_id, entity_type=et, entity_id=entity_id, shot_ids=list(shot_ids))
-    return entity_id
+    return entity_id, existing is not None
 
 
 def _file_format(file: FileItem) -> str:

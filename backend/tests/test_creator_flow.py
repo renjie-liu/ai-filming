@@ -190,7 +190,8 @@ async def test_creator_edit_links_manual_entities_and_uploads() -> None:
         assert board.shots[1].character_ids == [character.id]
 
         # 手动新增道具挂到两个镜头 → 按实体改为只在镜头 2 → 一个都不选仍留在作品里
-        prop_id = await create_chapter_entity(db, chapter_id="c1", entity_type="prop", name="闪电马克杯", description="闪电造型", shot_ids=["s1", "s2"])
+        prop_id, reused = await create_chapter_entity(db, chapter_id="c1", entity_type="prop", name="闪电马克杯", description="闪电造型", shot_ids=["s1", "s2"])
+        assert reused is False
         board = await build_creator_board(db, chapter_id="c1")
         prop = next(e for e in board.entities if e.type == "prop")
         assert prop.id == prop_id and prop.shot_ids == ["s1", "s2"] and board.shots[0].prop_ids == [prop_id]
@@ -204,6 +205,11 @@ async def test_creator_edit_links_manual_entities_and_uploads() -> None:
 
         # 其它集建档的角色也出现在本集（shot_count 0，排在后面）
         await create_chapter_entity(db, chapter_id="c1", entity_type="character", name="海洋", description="运维", shot_ids=[])
+        # 同名场景全局唯一：再次"新增"沿用已有实体并挂到镜头，不报错
+        scene_id, reused = await create_chapter_entity(db, chapter_id="c1", entity_type="scene", name="开放式办公区", description="", shot_ids=["s1", "s2"])
+        assert reused is True and scene_id == next(e.id for e in board.entities if e.type == "scene")
+        _dup_char, reused_char = await create_chapter_entity(db, chapter_id="c1", entity_type="character", name="海洋", description="穿拖鞋", shot_ids=[])
+        assert reused_char is True
         board = await build_creator_board(db, chapter_id="c1")
         names = [e.name for e in board.entities if e.type == "character"]
         assert names == ["雷霆总监", "海洋"]

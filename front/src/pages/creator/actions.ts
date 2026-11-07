@@ -278,14 +278,14 @@ export async function setEntityShots(chapterId: string, entity: CreatorEntityRea
   })
 }
 
-/** 手动新增角色 / 场景 / 道具并挂到镜头；返回实体 ID。 */
-export async function createEntity(args: { chapterId: string; type: CreatorEntityRead['type']; name: string; description: string; shotIds: string[] }): Promise<string> {
+/** 手动新增角色 / 场景 / 道具并挂到镜头；同名已存在时后端会沿用（reused=true）。 */
+export async function createEntity(args: { chapterId: string; type: CreatorEntityRead['type']; name: string; description: string; shotIds: string[] }): Promise<{ id: string; reused: boolean }> {
   const res = await StudioCreatorService.createChapterEntityApiApiV1StudioCreatorChaptersChapterIdEntitiesPost({
     chapterId: args.chapterId,
     requestBody: { type: args.type, name: args.name.trim(), description: args.description.trim(), shot_ids: args.shotIds },
   })
   if (!res.data?.id) throw new Error(res.message || '新增失败')
-  return res.data.id
+  return { id: res.data.id, reused: res.data.reused }
 }
 
 /** 改实体名称 / 设定描述。 */

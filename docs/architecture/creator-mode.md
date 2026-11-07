@@ -56,7 +56,7 @@ CreatorPage
 - `build_creator_board`：聚合镜头（细节含 `camera_shot` / `movement`、对白行含 `id` / `speaker_character_id`、关联实体 ID、首帧图、生成视频）、实体（最佳形象图、`shot_count` 与 `shot_ids`）与各资源最近一次任务（按 `GenerationTaskLink.relation_type` + `relation_entity_id`）。实体范围 = 本章节镜头关联到的 + **项目级已建档的**（其它集的角色、挂到项目的场景 / 道具），后者 `shot_count=0`，排在同类末尾，供沿用。
 - `set_shot_entity_links(shot_id, type, ids)`：整体替换镜头某类关联。新增的把同名提取候选 `mark_linked_by_name`；移除的把同名候选标记为 `ignored`（否则下次 auto-confirm 会按名字挂回）；角色先删后建以重排 index。
 - `set_entity_shots(chapter_id, type, id, shot_ids)`：按实体设置出现镜头，逐镜调用上面的函数；资产一个镜头都不选时仍保留项目级关联。
-- `create_chapter_entity`：复用 `entity_crud.create_entity`（沿用作品 style / visual_style），再挂镜头。
+- `create_chapter_entity`：名称规则与自动确认一致（角色按作品唯一，场景 / 道具 / 服装全局唯一 `uq_*_name`），同名已存在则沿用并返回 `reused=true`；否则复用 `entity_crud.create_entity`（沿用作品 style / visual_style）；最后挂镜头。
 - `attach_entity_image(type, id, file_id)`：角色新建正面 `CharacterImage` 并设为唯一主图；资产图片行按 (实体, 精度, 角度) 唯一，直接写进当前展示那一行。
 - `attach_shot_keyframe(shot_id, file_id)`：覆盖 / 新建 `ShotFrameImage(first)`。
 - `build_projects_overview`：作品列表计数与封面。
