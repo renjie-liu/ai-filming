@@ -32,11 +32,13 @@ CreatorPage
 | --- | --- | --- |
 | ① 剧本 | 一键拆分镜 | `ensureChapter`（创建 / 更新章节 raw_text）→ `divide-async(write_to_db)` → 轮询 → `extract-async(script_division)` → 轮询 → `POST chapters/{id}/auto-confirm` |
 | ① 剧本 | 重新拆分镜 | 先逐个 `DELETE shots/{id}`，再执行上面的链 |
-| ② 角色场景 | 生成形象 | 无图片槽位时 `POST entities/{type}/{id}/images`；`render-prompt` → `image-tasks`（character 走 `/characters/{id}/...`，其余走 `/assets/{type}/{id}/...`） |
+| ② 角色场景 | 生成形象 | 角色：`render-prompt` / `image-tasks` 允许 `image_id` 为空，按角色级任务（`relation_type=character`）执行，完成后由执行器创建首张正面 `CharacterImage`（该表 `file_id` 非空，不能预建空槽位）；场景 / 道具 / 服装：无槽位时先 `POST entities/{type}/{id}/images`，再 `render-prompt` → `image-tasks` |
 | ③ 分镜 | 生成关键帧 | 画面描述为空时 `POST film/tasks/shot-frame-prompts(first)` → 轮询 → 读 `shot-details` 的 `first_frame_prompt`；再 `POST image-tasks/shot/{id}/frame-image-tasks`（参考图 = 镜头关联实体的形象图 `image_file_id`，比例 = 作品默认比例） |
 | ③ 分镜 | 编辑 / 增删 | `PATCH shots/{id}`、`PATCH shot-details/{id}`（`first_frame_prompt`、`duration`）、`POST shots` + `auto-confirm`、`DELETE shots/{id}` |
-| ④ 视频 | 开始生成 / 重试 | 每镜 `preview-prompt` → `POST film/tasks/video`；有关键帧用 `reference_mode=first` + 首帧 file_id，否则 `text_only` |
+| ④ 视频 | 开始生成 / 重试 | 每镜 `preview-prompt` → `POST film/tasks/video`；有关键帧用 `reference_mode=first` + 首帧 file_id，否则 `text_only`。Seedance 会拒绝含真人形象的参考图（`InputImageSensitiveContentDetected.PrivacyInformation`，写实风格的 AI 人像也会触发），此时重试按钮改为「改用文字描述重试」并以 `text_only` 重新提交 |
 | ⑤ 成片 | 连播 / 下载 | 直接使用 `creator-board` 返回的 `video_url`（对象存储公网地址或 `/files/{id}/download`） |
+
+已在线验证（2026-11-07）：拆分镜 8 s（4 镜）→ 识别 41 s → 自动确认（17 个候选、7 个实体、3 条对白）→ 关键帧 4 s + 17 s → 视频（text_only）成功落盘并可播放。
 
 错误透传：任务失败原因来自 `CreatorTaskRead.error`（后端 `ArkApiError` / `ArkTaskFailedError` 原文），前端经 `utils/errorMessage.ts` 映射为中文。
 
