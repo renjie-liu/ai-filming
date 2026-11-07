@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { CreatorDialogueLineRead } from './CreatorDialogueLineRead';
+import type { CreatorImageCandidateRead } from './CreatorImageCandidateRead';
 import type { CreatorTaskRead } from './CreatorTaskRead';
 /**
  * 创作页分镜卡所需的镜头信息。
@@ -60,6 +61,26 @@ export type CreatorShotRead = {
      * 最近一次首帧图片任务
      */
     keyframe_image_task: (CreatorTaskRead | null);
+    /**
+     * 关键帧候选 / 历史（当前在前，最多 8 张）
+     */
+    keyframe_candidates: Array<CreatorImageCandidateRead>;
+    /**
+     * 预演四宫格图片地址
+     */
+    preview_grid_url: (string | null);
+    /**
+     * 最近一次预演四宫格任务
+     */
+    preview_grid_task: (CreatorTaskRead | null);
+    /**
+     * 配音 / 配乐参考文件 ID
+     */
+    audio_file_id: (string | null);
+    /**
+     * 配音 / 配乐参考地址
+     */
+    audio_url: (string | null);
     /**
      * 生成视频文件 ID
      */

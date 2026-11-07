@@ -214,6 +214,46 @@ export async function generateEntityImage(entity: CreatorEntityRead, prompt?: st
   })
 }
 
+/**
+ * 一次生成多张候选：提示词只渲染一次，再连发 N 个图片任务；全部结果都留在历史候选里供挑选。
+ * 为什么存在：形象「抽卡」是所有短剧平台的默认交互，多张同发比点 N 次「换一张」省一次次等待。
+ */
+export async function generateEntityImages(entity: CreatorEntityRead, count: number, prompt?: string): Promise<void> {
+  const n = Math.max(1, Math.min(4, Math.round(count)))
+  let finalPrompt = prompt?.trim() ?? ''
+  if (!finalPrompt) finalPrompt = (await renderEntityPrompt(entity)).prompt
+  for (let i = 0; i < n; i += 1) await generateEntityImage(entity, finalPrompt)
+}
+
+/** 采用历史候选 / 上传过的某一张作为实体当前形象（不新建图片行，只切换）。 */
+export async function adoptEntityImage(entity: CreatorEntityRead, fileId: string): Promise<void> {
+  await StudioCreatorService.attachEntityImageApiApiV1StudioCreatorEntitiesEntityTypeEntityIdImageFromFilePost({
+    entityType: entity.type,
+    entityId: entity.id,
+    requestBody: { file_id: fileId },
+  })
+}
+
+/** 采用历史候选作为镜头当前关键帧。 */
+export async function adoptShotKeyframe(shot: CreatorShotRead, fileId: string): Promise<void> {
+  await StudioCreatorService.attachShotKeyframeApiApiV1StudioCreatorShotsShotIdKeyframeFromFilePost({ shotId: shot.id, requestBody: { file_id: fileId } })
+}
+
+/** 以正面形象为参考派生侧面 / 背面等视角（每个视角一个图片任务）；返回任务数。 */
+export async function generateCharacterViews(entity: CreatorEntityRead, views: Array<'left' | 'right' | 'back' | 'three_quarter'>): Promise<number> {
+  const res = await StudioCreatorService.generateCharacterViewsApiApiV1StudioCreatorEntitiesCharacterCharacterIdViewsPost({
+    characterId: entity.id,
+    requestBody: { views },
+  })
+  return res.data?.task_ids.length ?? 0
+}
+
+/** 生成镜头的预演四宫格（一张 2×2 图演四个节拍）；整图比例按作品比例，四格各自保持同样比例。 */
+export async function generatePreviewGrid(shot: CreatorShotRead, ratio: VideoRatio): Promise<void> {
+  const res = await StudioCreatorService.generatePreviewGridApiApiV1StudioCreatorShotsShotIdPreviewGridPost({ shotId: shot.id, requestBody: { ratio } })
+  if (!res.data?.task_id) throw new Error(res.message || '四宫格任务创建失败')
+}
+
 // ---------------------------------------------------------------------------
 // 角色场景 / 分镜的编辑动作（P2）
 // ---------------------------------------------------------------------------
@@ -222,7 +262,7 @@ export type UploadScope = {
   projectId: string
   chapterId?: string | null
   shotId?: string | null
-  usageKind: 'character_image' | 'asset_image' | 'shot_frame' | 'generated_video' | 'upload'
+  usageKind: 'character_image' | 'asset_image' | 'shot_frame' | 'generated_video' | 'reference_audio' | 'upload'
 }
 
 /** 上传一张图片：先在浏览器缩到 2K 以内（避开函数请求体上限），再建文件记录；返回文件 ID。 */
@@ -379,14 +419,25 @@ export function isRealPersonRejection(error: string | null | undefined): boolean
   return /PrivacyInformation|real person/i.test(error ?? '')
 }
 
-/** 一次视频生成的参考方案：模式 + 参考图 file_id（reference 模式还带每张图的 [Image n] 说明）。 */
-export type VideoPlan = { mode: VideoGenerationTaskRequest['reference_mode']; images: string[]; labels?: string[] }
+/**
+ * 一次视频生成的参考方案：模式 + 参考图 file_id（reference 模式还带每张图的 [Image n] 说明）
+ * + 可选的配音 / 配乐参考文件（提示词里以 [Audio 1] 引用）。
+ */
+export type VideoPlan = { mode: VideoGenerationTaskRequest['reference_mode']; images: string[]; labels?: string[]; audioFileId?: string | null }
 
 /** 让后端按镜头信息（含参考素材块、镜头语言、时间码节拍）渲染视频提示词；prompt 传入时只做补强不重写。 */
 export async function previewVideoPrompt(args: { shot: CreatorShotRead; ratio: VideoRatio; plan: VideoPlan; prompt?: string | null }): Promise<{ prompt: string; images: string[]; labels: string[] }> {
   const { shot, ratio, plan, prompt } = args
   const preview = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
-    requestBody: { shot_id: shot.id, reference_mode: plan.mode, prompt: prompt ?? null, images: plan.images, reference_labels: plan.labels ?? null, ratio },
+    requestBody: {
+      shot_id: shot.id,
+      reference_mode: plan.mode,
+      prompt: prompt ?? null,
+      images: plan.images,
+      reference_labels: plan.labels ?? null,
+      audio_file_id: plan.audioFileId ?? null,
+      ratio,
+    },
   })
   const rendered = preview.data?.prompt?.trim()
   if (!rendered) throw new Error('没有生成出视频提示词')
@@ -400,7 +451,8 @@ export async function previewVideoPrompt(args: { shot: CreatorShotRead; ratio: V
 export async function generateVideo(args: { shot: CreatorShotRead; ratio: VideoRatio; plan?: VideoPlan; prompt?: string | null; textOnly?: boolean }): Promise<void> {
   const { shot, ratio, textOnly } = args
   let plan: VideoPlan = args.plan ?? (shot.keyframe_file_id ? { mode: 'first', images: [shot.keyframe_file_id] } : { mode: 'text_only', images: [] })
-  if (textOnly) plan = { mode: 'text_only', images: [] }
+  if (textOnly) plan = { mode: 'text_only', images: [], audioFileId: plan.audioFileId }
+  if (plan.audioFileId === undefined) plan = { ...plan, audioFileId: shot.audio_file_id ?? null }
   const preview = await previewVideoPrompt({ shot, ratio, plan, prompt: args.prompt })
   const res = await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
     requestBody: {
@@ -409,6 +461,7 @@ export async function generateVideo(args: { shot: CreatorShotRead; ratio: VideoR
       prompt: preview.prompt,
       images: preview.images,
       reference_labels: plan.mode === 'reference' ? preview.labels : null,
+      audio_file_id: plan.audioFileId ?? null,
       ratio,
     },
   })
@@ -416,11 +469,12 @@ export async function generateVideo(args: { shot: CreatorShotRead; ratio: VideoR
 }
 
 /**
- * 上传一段视频：存储是 Vercel Blob 时浏览器直传（绕开函数 4.5 MB 请求体上限），否则走多部分上传并限制大小。
+ * 上传一段视频或音频：存储是 Vercel Blob 时浏览器直传（绕开函数 4.5 MB 请求体上限），否则走多部分上传并限制大小。
  * 返回文件 ID。
  */
-export async function uploadVideo(file: File, scope: UploadScope): Promise<string> {
+export async function uploadMedia(file: File, scope: UploadScope, fallbackContentType: string): Promise<string> {
   const caps = await StudioFilesService.directUploadCapabilitiesApiApiV1StudioFilesDirectUploadCapabilitiesGet()
+  const kindLabel = fallbackContentType.startsWith('audio/') ? '音频' : '视频'
   if (caps.data?.direct === 'vercel_blob') {
     const prepared = await StudioFilesService.directUploadPrepareApiApiV1StudioFilesDirectUploadPreparePost({ requestBody: { filename: file.name } })
     const storageKey = prepared.data?.storage_key
@@ -430,7 +484,7 @@ export async function uploadVideo(file: File, scope: UploadScope): Promise<strin
     const result = await upload(pathname, file, {
       access: 'public',
       handleUploadUrl: `${OpenAPI.BASE}/api/v1/studio/files/client-upload`,
-      contentType: file.type || 'video/mp4',
+      contentType: file.type || fallbackContentType,
       multipart: file.size > 8 * 1024 * 1024,
     })
     const registered = await StudioFilesService.directUploadRegisterApiApiV1StudioFilesDirectUploadRegisterPost({
@@ -451,7 +505,7 @@ export async function uploadVideo(file: File, scope: UploadScope): Promise<strin
     return id
   }
   const max = caps.data?.max_server_upload_bytes ?? 4 * 1024 * 1024
-  if (file.size > max) throw new Error(`视频超过 ${Math.round(max / 1024 / 1024)} MB，当前存储不支持浏览器直传，请压缩后再传`)
+  if (file.size > max) throw new Error(`${kindLabel}超过 ${Math.round(max / 1024 / 1024)} MB，当前存储不支持浏览器直传，请压缩后再传`)
   const res = await StudioFilesService.uploadFileApiApiV1StudioFilesUploadPost({
     formData: { file: file as unknown as string, project_id: scope.projectId, chapter_id: scope.chapterId ?? null, shot_id: scope.shotId ?? null, usage_kind: scope.usageKind },
   })
@@ -460,10 +514,26 @@ export async function uploadVideo(file: File, scope: UploadScope): Promise<strin
   return id
 }
 
+/** 上传一段视频（见 uploadMedia）。 */
+export function uploadVideo(file: File, scope: UploadScope): Promise<string> {
+  return uploadMedia(file, scope, 'video/mp4')
+}
+
 /** 用自己的视频片段作为镜头成片（替换 AI 生成结果）。 */
 export async function uploadShotVideo(shot: CreatorShotRead, file: File, scope: { projectId: string; chapterId: string }): Promise<void> {
   const fileId = await uploadVideo(file, { ...scope, shotId: shot.id, usageKind: 'generated_video' })
   await StudioCreatorService.attachShotVideoApiApiV1StudioCreatorShotsShotIdVideoFromFilePost({ shotId: shot.id, requestBody: { file_id: fileId } })
+}
+
+/** 上传配音 / 配乐，设为镜头的音频参考（Seedance 2.x reference_audio；提示词里以 [Audio 1] 引用）。 */
+export async function uploadShotAudio(shot: CreatorShotRead, file: File, scope: { projectId: string; chapterId: string }): Promise<void> {
+  const fileId = await uploadMedia(file, { ...scope, shotId: shot.id, usageKind: 'reference_audio' }, 'audio/mpeg')
+  await StudioCreatorService.attachShotAudioApiApiV1StudioCreatorShotsShotIdAudioFromFilePost({ shotId: shot.id, requestBody: { file_id: fileId } })
+}
+
+/** 清除镜头的音频参考。 */
+export async function clearShotAudio(shot: CreatorShotRead): Promise<void> {
+  await StudioCreatorService.clearShotAudioApiApiV1StudioCreatorShotsShotIdAudioDelete({ shotId: shot.id })
 }
 
 /** 新增一个镜头（带默认时长 4 秒），并自动确认使其可生成。 */

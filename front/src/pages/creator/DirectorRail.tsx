@@ -1,6 +1,7 @@
 import type React from 'react'
 import { Button, Card, Progress } from 'antd'
 import type { CreatorBoardRead } from '../../services/generated'
+import { viewAngleLabel } from './labels'
 import { CREATOR_STEPS, type CreatorStepKey } from './routes'
 import { isActiveStatus } from './taskPolling'
 
@@ -18,10 +19,14 @@ export function collectRunningTasks(board: CreatorBoardRead | null): Array<{ nam
   if (board.extract_task && isActiveStatus(board.extract_task.status)) out.push({ name: '识别角色与场景', progress: board.extract_task.progress })
   for (const e of board.entities) {
     if (e.image_task && isActiveStatus(e.image_task.status)) out.push({ name: `形象 · ${e.name}`, progress: e.image_task.progress })
+    for (const v of e.views) {
+      if (v.task && isActiveStatus(v.task.status)) out.push({ name: `${viewAngleLabel(v.view_angle)} · ${e.name}`, progress: v.task.progress })
+    }
   }
   for (const s of board.shots) {
     if (s.keyframe_prompt_task && isActiveStatus(s.keyframe_prompt_task.status)) out.push({ name: `画面描述 · ${s.title}`, progress: s.keyframe_prompt_task.progress })
     if (s.keyframe_image_task && isActiveStatus(s.keyframe_image_task.status)) out.push({ name: `关键帧 · ${s.title}`, progress: s.keyframe_image_task.progress })
+    if (s.preview_grid_task && isActiveStatus(s.preview_grid_task.status)) out.push({ name: `四宫格 · ${s.title}`, progress: s.preview_grid_task.progress })
     if (s.video_task && isActiveStatus(s.video_task.status)) out.push({ name: `视频 · ${s.title}`, progress: s.video_task.progress })
   }
   return out
@@ -29,9 +34,9 @@ export function collectRunningTasks(board: CreatorBoardRead | null): Array<{ nam
 
 export const STEP_TIPS: Record<CreatorStepKey, string> = {
   script: '粘贴剧本后点「一键拆分镜」。拆分只分析文字，不消耗生成额度，可以多试几次。',
-  cast: '先定下主要角色的形象（AI 生成或上传自己的图），后面的关键帧和视频都会沿用，画面才不会换人。点卡片可以改设定、改提示词、选出现的镜头。',
-  storyboard: '点镜头卡可以改画面描述、景别运镜、对白和画面里的人物场景，也能上传自己的关键帧。先出关键帧看构图再生成视频，便宜得多。',
-  video: '确认镜头和时长后开始生成，额度在此时才扣；失败的镜头看原因后单独重试。',
+  cast: '先定下主要角色的形象（可一次生成几张挑一张，或上传自己的图），后面的关键帧和视频都会沿用，画面才不会换人。主角再补一组侧面 / 背面，转身镜头也不换脸。',
+  storyboard: '点镜头卡可以改画面描述、景别运镜、动作节拍、对白和画面里的人物场景，也能上传自己的关键帧。不确定节奏时先出一张预演四宫格，比生视频便宜得多。',
+  video: '确认镜头和时长后开始生成，额度在此时才扣；失败的镜头看原因后单独重试。有配音或配乐可以在「调整」里传上去，模型会按它的节奏生成。',
   final: '满意就下载片段；不满意的镜头回到「视频」单独重做，其余不受影响。',
 }
 

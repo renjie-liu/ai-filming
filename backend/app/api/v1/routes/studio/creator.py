@@ -19,18 +19,26 @@ from app.schemas.common import (
 from app.schemas.studio.creator import (
     AttachedImageRead,
     AttachedVideoRead,
+    CharacterViewsRequest,
     CreatorEntityCreate,
     CreatorEntityCreatedRead,
     EntityShotsWrite,
     FileAttachRequest,
+    PreviewGridRequest,
+    ShotAudioRead,
     ShotEntityLinksWrite,
+    TaskIdRead,
+    TaskIdsRead,
 )
 from app.services.studio.creator_flow import (
     CreatorInputError,
     attach_entity_image,
+    attach_shot_audio,
     attach_shot_keyframe,
     attach_shot_video,
     create_chapter_entity,
+    generate_character_views,
+    generate_preview_grid,
     set_entity_shots,
     set_shot_entity_links,
 )
@@ -164,3 +172,76 @@ async def attach_shot_video_api(
         raise _http_error(exc) from exc
     await db.commit()
     return success_response(AttachedVideoRead(shot_id=shot_id, file_id=file_id))
+
+
+@router.post(
+    "/entities/character/{character_id}/views",
+    response_model=ApiResponse[TaskIdsRead],
+    status_code=status.HTTP_201_CREATED,
+    summary="创作模式：以正面形象为参考派生侧面 / 背面等视角（每个视角一个图片任务）",
+)
+async def generate_character_views_api(
+    character_id: str,
+    body: CharacterViewsRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[TaskIdsRead]:
+    try:
+        task_ids = await generate_character_views(db, character_id=character_id, views=list(body.views))
+    except ValueError as exc:
+        raise _http_error(exc) from exc
+    await db.commit()
+    return created_response(TaskIdsRead(task_ids=task_ids))
+
+
+@router.post(
+    "/shots/{shot_id}/preview-grid",
+    response_model=ApiResponse[TaskIdRead],
+    status_code=status.HTTP_201_CREATED,
+    summary="创作模式：生成预演四宫格（一张 2×2 图看四个节拍）",
+)
+async def generate_preview_grid_api(
+    shot_id: str,
+    body: PreviewGridRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[TaskIdRead]:
+    try:
+        task_id = await generate_preview_grid(db, shot_id=shot_id, ratio=body.ratio)
+    except ValueError as exc:
+        raise _http_error(exc) from exc
+    await db.commit()
+    return created_response(TaskIdRead(task_id=task_id))
+
+
+@router.post(
+    "/shots/{shot_id}/audio-from-file",
+    response_model=ApiResponse[ShotAudioRead],
+    summary="创作模式：把上传的音频设为镜头的配音 / 配乐参考",
+)
+async def attach_shot_audio_api(
+    shot_id: str,
+    body: FileAttachRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[ShotAudioRead]:
+    try:
+        file_id = await attach_shot_audio(db, shot_id=shot_id, file_id=body.file_id)
+    except ValueError as exc:
+        raise _http_error(exc) from exc
+    await db.commit()
+    return success_response(ShotAudioRead(shot_id=shot_id, file_id=file_id))
+
+
+@router.delete(
+    "/shots/{shot_id}/audio",
+    response_model=ApiResponse[ShotAudioRead],
+    summary="创作模式：清除镜头的配音 / 配乐参考",
+)
+async def clear_shot_audio_api(
+    shot_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[ShotAudioRead]:
+    try:
+        await attach_shot_audio(db, shot_id=shot_id, file_id=None)
+    except ValueError as exc:
+        raise _http_error(exc) from exc
+    await db.commit()
+    return success_response(ShotAudioRead(shot_id=shot_id, file_id=None))

@@ -58,7 +58,14 @@ const RULES: Array<[RegExp, string | ((m: RegExpMatchArray) => string)]> = [
   [/No reference images available/i, '这个镜头还没有可用的参考图：先给角色生成形象或生成关键帧，或者改用「仅文字」'],
   [/reference_mode=reference requires 1-9 images/i, '形象参考最多 9 张、至少 1 张，请调整勾选'],
   [/url does not match the prepared upload path|invalid upload pathname|invalid storage key/i, '上传校验失败，请重新上传'],
-  [/direct upload is unavailable/i, '当前存储不支持浏览器直传，视频需在 4 MB 以内'],
+  [/direct upload is unavailable/i, '当前存储不支持浏览器直传，视频 / 音频需在 4 MB 以内'],
+  // ---- 创作页：三视图 / 四宫格 / 音频参考 ----
+  [/Character has no front portrait/i, '角色还没有正面形象，先生成或上传一张，再派生侧面 / 背面'],
+  [/unsupported view/i, '不支持的视角'],
+  [/file is not audio|File is not audio/i, '请选择音频文件（mp3 / wav / m4a / aac）'],
+  [/Audio reference needs a public URL/i, '音频需要可公网访问的地址，请重新上传一次'],
+  [/Invalid audio file_id/i, '音频文件不可用，请重新上传'],
+  [/file is not a video/i, '请选择视频文件（mp4 / mov / webm）'],
   // ---- 上传 ----
   [/Request Entity Too Large|Payload Too Large|FUNCTION_PAYLOAD_TOO_LARGE|\b413\b/i, '图片太大，请换一张 4 MB 以内的图片'],
   [/Unsupported file type|unsupported (image|media) type/i, '不支持的图片格式，请使用 JPG / PNG / WebP'],

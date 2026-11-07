@@ -5,18 +5,32 @@ import { PlusOutlined } from '@ant-design/icons'
 import type { CreatorBoardRead, CreatorEntityRead } from '../../../services/generated'
 import { useIsMobile } from '../../../hooks/useIsMobile'
 import { localizeErrorMessage } from '../../../utils/errorMessage'
-import { createEntity, deleteEntity, generateEntityImage, renderEntityPrompt, setEntityShots, updateEntity, uploadEntityImage } from '../actions'
+import {
+  adoptEntityImage,
+  createEntity,
+  deleteEntity,
+  generateCharacterViews,
+  generateEntityImage,
+  generateEntityImages,
+  renderEntityPrompt,
+  setEntityShots,
+  updateEntity,
+  uploadEntityImage,
+} from '../actions'
 import ImagePickButton from '../ImagePickButton'
-import { CREATABLE_ENTITY_TYPES, ENTITY_TYPE_LABEL, type CreatorEntityType } from '../labels'
-import { ArtBox, SectionTitle, TaskTag, taskErrorText } from '../ui'
+import { CREATABLE_ENTITY_TYPES, DEFAULT_CHARACTER_VIEWS, ENTITY_TYPE_LABEL, viewAngleLabel, type CreatorEntityType } from '../labels'
+import { ArtBox, CandidateStrip, SectionTitle, TaskTag, taskErrorText } from '../ui'
 import { isActiveStatus } from '../taskPolling'
 
 /**
  * 第 2 步 · 角色场景：剧本里认出来的人和地方，都是可编辑的资产卡。
  *
- * 每张卡可以：AI 生成形象（提示词可先看可改）、上传自己的图、改名称 / 设定、选它出现在哪些镜头、删除；
+ * 每张卡可以：AI 生成形象（一次 1–4 张候选，提示词可先看可改）、在历史候选里挑一张 / 回退、上传自己的图、
+ * 改名称 / 设定、选它出现在哪些镜头、删除；角色还能以正面形象派生侧面 / 背面（三视图），转身镜头不换脸。
  * 也可以手动新增角色 / 场景 / 道具。其它集建过档的实体也会列出（标「本集未用到」），方便沿用。
  */
+
+const COUNT_OPTIONS = [1, 2, 4].map((n) => ({ value: n, label: `${n} 张` }))
 
 type Props = {
   board: CreatorBoardRead
@@ -94,6 +108,8 @@ const EntityDrawer: React.FC<{
   const [promptLoading, setPromptLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [count, setCount] = useState(1)
+  const [viewsRunning, setViewsRunning] = useState(false)
 
   // 抽屉打开时按实体初始化；聚合轮询刷新时不覆盖用户正在改的内容
   const entityId = entity?.id
@@ -104,6 +120,7 @@ const EntityDrawer: React.FC<{
     setShotIds(entity.shot_ids)
     setPrompt(null)
     setPromptDirty(false)
+    setCount(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityId])
 
@@ -152,10 +169,10 @@ const EntityDrawer: React.FC<{
     setGenerating(true)
     try {
       const changed = await saveBasics()
-      await generateEntityImage(entity, promptDirty && prompt ? prompt : undefined)
+      await generateEntityImages(entity, count, promptDirty && prompt ? prompt : undefined)
       if (changed) await onChanged()
       onTaskStarted()
-      message.success('已开始生成，完成后会自动显示')
+      message.success(count > 1 ? `已开始生成 ${count} 张候选，完成后在「历史候选」里挑一张` : '已开始生成，完成后会自动显示')
     } catch (e) {
       message.error(errText(e, '生成失败，请稍后重试'))
     } finally {
@@ -166,6 +183,28 @@ const EntityDrawer: React.FC<{
     await uploadEntityImage(entity, file, { projectId: board.project.id, chapterId: board.chapter.id })
     await onChanged()
     message.success('已换成你上传的图片')
+  }
+  const adopt = async (fileId: string) => {
+    try {
+      await adoptEntityImage(entity, fileId)
+      await onChanged()
+      message.success('已采用这张')
+    } catch (e) {
+      message.error(errText(e, '切换失败'))
+    }
+  }
+  const makeViews = async () => {
+    setViewsRunning(true)
+    try {
+      const n = await generateCharacterViews(entity, DEFAULT_CHARACTER_VIEWS)
+      await onChanged()
+      onTaskStarted()
+      message.success(`已开始生成 ${n} 个视角，完成后会自动显示`)
+    } catch (e) {
+      message.error(errText(e, '三视图生成失败'))
+    } finally {
+      setViewsRunning(false)
+    }
   }
   const remove = async () => {
     try {
@@ -192,13 +231,44 @@ const EntityDrawer: React.FC<{
               {entity.shot_count > 0 ? <span className="text-xs text-gray-500">出现在 {entity.shot_count} 个镜头</span> : <Tag>本集未用到</Tag>}
             </div>
             {error && <div className="text-red-600 text-xs">{error}</div>}
-            <Button type="primary" loading={generating} disabled={!!active} onClick={() => void generate()}>
-              {entity.thumbnail ? 'AI 重新生成' : isCharacter ? 'AI 生成形象' : 'AI 生成参考图'}
-            </Button>
+            <div className="flex gap-2 items-center">
+              <Button type="primary" loading={generating} disabled={!!active} onClick={() => void generate()}>
+                {entity.thumbnail ? 'AI 重新生成' : isCharacter ? 'AI 生成形象' : 'AI 生成参考图'}
+              </Button>
+              <Select id="entity-count" size="middle" value={count} onChange={(v) => setCount(Number(v))} options={COUNT_OPTIONS} className="w-20" aria-label="生成张数" />
+            </div>
             <ImagePickButton onPick={upload} size="middle" disabled={!!active}>上传自己的图片</ImagePickButton>
-            <span className="text-xs text-gray-400">上传的图会直接作为{isCharacter ? '形象' : '参考图'}；AI 生成按下方提示词出图。</span>
+            <span className="text-xs text-gray-400">一次生成多张可以挑一张；上传的图会直接作为{isCharacter ? '形象' : '参考图'}；AI 生成按下方提示词出图。</span>
           </div>
         </div>
+
+        <CandidateStrip candidates={entity.image_candidates} onAdopt={adopt} ratio={isCharacter ? 'square' : 'landscape'} disabled={!!active} />
+
+        {isCharacter && (
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">其它视角（侧面 / 背面，视频里转身也不换脸）</span>
+              <Button size="small" type="link" loading={viewsRunning} disabled={!entity.thumbnail || !!active} onClick={() => void makeViews()}>
+                {entity.views.length > 0 ? '重新生成三视图' : '生成三视图'}
+              </Button>
+            </div>
+            {entity.views.length === 0 ? (
+              <div className="text-xs text-gray-400 bg-gray-50 rounded p-2">{entity.thumbnail ? '以当前正面形象为参考，派生左侧面与背面各一张；生成视频时会一并作为参考。' : '先定下正面形象，再派生其它视角。'}</div>
+            ) : (
+              <div className="flex gap-2 overflow-x-auto pb-1" data-testid="view-strip">
+                {entity.views.map((v) => (
+                  <div key={v.image_id} className="w-24 shrink-0 flex flex-col gap-1">
+                    <ArtBox src={v.url || null} task={v.task} placeholder={viewAngleLabel(v.view_angle)} ratio="square" />
+                    <div className="flex items-center justify-between text-[11px] text-gray-500">
+                      <span>{viewAngleLabel(v.view_angle)}</span>
+                      {v.task && v.task.status === 'failed' && <Tag color="error" className="m-0 text-[10px]">失败</Tag>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-col gap-1">
           <span className="text-xs text-gray-500">名称</span>

@@ -7,11 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
 from app.dependencies import get_db
 from app.models.task_links import GenerationTaskLink
+from app.schemas.common import ApiResponse, created_response, success_response
 from app.schemas.studio.shots import ShotVideoPromptPackRead
 from app.services.film.generated_video import build_run_args, preview_prompt_and_images
 from app.services.studio.shot_status import mark_shot_generating
 from app.tasks.execute_task import enqueue_task_execution
-from app.schemas.common import ApiResponse, created_response, success_response
 
 from .common import TaskCreated, _CreateOnlyTask
 from .video_request import VideoGenerationTaskRequest
@@ -45,6 +45,7 @@ async def preview_video_generation_prompt(
         prompt=body.prompt,
         images=body.images,
         reference_labels=body.reference_labels,
+        audio_file_id=body.audio_file_id,
     )
     return success_response(VideoPromptPreviewResponse(prompt=prompt, images=images, reference_labels=labels, pack=pack))
 
@@ -71,6 +72,7 @@ async def create_video_generation_task(
         images=body.images,
         ratio=body.ratio,
         reference_labels=body.reference_labels,
+        audio_file_id=body.audio_file_id,
     )
 
     task_record = await tm.create(

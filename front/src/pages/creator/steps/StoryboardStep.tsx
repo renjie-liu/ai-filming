@@ -7,8 +7,10 @@ import { useIsMobile } from '../../../hooks/useIsMobile'
 import { localizeErrorMessage } from '../../../utils/errorMessage'
 import {
   addShot,
+  adoptShotKeyframe,
   deleteShot,
   generateKeyframe,
+  generatePreviewGrid,
   linkedEntities,
   resolveRatio,
   rewriteShotDescription,
@@ -20,14 +22,15 @@ import {
 } from '../actions'
 import ImagePickButton from '../ImagePickButton'
 import { CAMERA_ANGLE_OPTIONS, CAMERA_MOVEMENT_OPTIONS, CAMERA_SHOT_OPTIONS, ENTITY_TYPE_LABEL, cameraAngleLabel, cameraMovementLabel, cameraShotLabel } from '../labels'
-import { ArtBox, DurationBadge, IndexBadge, TaskTag, taskErrorText } from '../ui'
+import { ArtBox, CandidateStrip, DurationBadge, IndexBadge, TaskTag, taskErrorText } from '../ui'
 import { isActiveStatus } from '../taskPolling'
 
 /**
  * 第 3 步 · 分镜板：每个镜头一张卡。
  *
- * 卡片可生成 / 重画关键帧；抽屉里可以改标题、景别、运镜、画面描述（AI 改写）、时长、
- * 画面里会用到的角色 / 场景 / 道具、对白，也可以上传自己的图当关键帧。
+ * 卡片可生成 / 重画关键帧；抽屉里可以在历史候选里挑一张关键帧 / 回退、改标题、景别、机位、运镜、动作节拍、
+ * 画面描述（AI 改写）、时长、画面里会用到的角色 / 场景 / 道具、对白，也可以上传自己的图当关键帧，
+ * 并在生视频前先出一张「预演四宫格」（2×2 图演四个节拍）检查节奏与连续性。
  */
 
 type Props = {
@@ -148,6 +151,7 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
   const [saving, setSaving] = useState(false)
   const [rewriting, setRewriting] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [gridRunning, setGridRunning] = useState(false)
   const [batchRunning, setBatchRunning] = useState(false)
   const ratio = resolveRatio(board)
   const characters = useMemo(() => board.entities.filter((e) => e.type === 'character'), [board.entities])
@@ -237,6 +241,32 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
     await onChanged()
     message.success('已换成你上传的关键帧')
   }
+  const adopt = async (fileId: string) => {
+    if (!editing) return
+    try {
+      await adoptShotKeyframe(editing, fileId)
+      await onChanged()
+      message.success('已采用这张关键帧')
+    } catch (e) {
+      message.error(errText(e, '切换失败'))
+    }
+  }
+  /** 先把抽屉里的节拍 / 镜头语言存下来（四宫格按它们画），再创建四宫格任务。 */
+  const makeGrid = async () => {
+    if (!editing) return
+    setGridRunning(true)
+    try {
+      await persist(editing)
+      await onChanged()
+      await generatePreviewGrid(editing, ratio)
+      onTaskStarted()
+      message.success('已开始生成预演四宫格')
+    } catch (e) {
+      message.error(errText(e, '四宫格生成失败'))
+    } finally {
+      setGridRunning(false)
+    }
+  }
   const rewrite = async () => {
     if (!editing) return
     setRewriting(true)
@@ -323,6 +353,31 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
                 <ImagePickButton onPick={upload} size="middle" disabled={keyframeActive(editing)}>上传自己的图片</ImagePickButton>
                 <span className="text-xs text-gray-400">关键帧会作为这个镜头视频的首帧；留空时视频只按文字生成。</span>
               </div>
+            </div>
+            <CandidateStrip candidates={editing.keyframe_candidates} onAdopt={adopt} ratio={keyframeRatio(board)} disabled={keyframeActive(editing)} />
+
+            {/* 预演四宫格：一张图看四个节拍 */}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">预演四宫格（一张图演四个节拍，先看节奏再生视频）</span>
+                <Button size="small" type="link" loading={gridRunning} disabled={!!(editing.preview_grid_task && isActiveStatus(editing.preview_grid_task.status))} onClick={() => void makeGrid()}>
+                  {editing.preview_grid_url ? '重新生成四宫格' : '生成四宫格'}
+                </Button>
+              </div>
+              {editing.preview_grid_url || editing.preview_grid_task ? (
+                <div className="flex gap-3 items-start">
+                  <div className={keyframeRatio(board) === 'landscape' ? 'w-56 shrink-0' : 'w-32 shrink-0'}>
+                    <ArtBox src={editing.preview_grid_url} task={editing.preview_grid_task} placeholder="四宫格生成中" ratio={keyframeRatio(board)} />
+                  </div>
+                  <div className="flex flex-col gap-1 text-xs text-gray-500">
+                    <TaskTag task={editing.preview_grid_task} />
+                    {taskErrorText(editing.preview_grid_task) && !editing.preview_grid_url && <span className="text-red-600">{taskErrorText(editing.preview_grid_task)}</span>}
+                    <span>四格从左上到右下按时间顺序，对应动作节拍。节奏不对就改节拍再生成一次，只花一张图的费用。</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-gray-400 bg-gray-50 rounded p-2">按下方动作节拍、景别运镜与画面里的人物场景，画一张 2×2 连续分镜；花一张图的费用先看节奏和人物连续性。</div>
+              )}
             </div>
 
             <div className="flex flex-col gap-1">

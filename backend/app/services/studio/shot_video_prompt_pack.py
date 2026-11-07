@@ -556,3 +556,27 @@ async def build_shot_video_prompt_pack(
         style=_enum_value(getattr(project, "style", None)),
         negative_prompt=DEFAULT_VIDEO_NEGATIVE_PROMPT,
     )
+
+
+def build_preview_grid_prompt(pack: ShotVideoPromptPackRead) -> str:
+    """预演四宫格的图片提示词：一张 2×2 图，四格按时间顺序各演一个节拍，用一次图片费用先看节奏与连续性。"""
+    beats = [str(beat).strip() for beat in pack.action_beats if str(beat or "").strip()][:4]
+    if not beats:
+        beats = [pack.script_excerpt.strip() or pack.title.strip() or "镜头主要动作"]
+    lines = ["一张 2×2 四格连续分镜图：同一张图里四个画面，用白色细线分隔，从左上到右下按时间顺序，每格一个节拍，四格里是同一角色、同一场景、同一服装。"]
+    for index, beat in enumerate(beats, 1):
+        lines.append(f"第 {index} 格：{beat}")
+    if len(beats) < 4:
+        lines.append(f"第 {len(beats) + 1}–4 格：延续上一格动作的后续瞬间，构图连续。")
+    phrase = camera_phrase(pack.camera)
+    if phrase:
+        lines.append(f"镜头语言：{phrase}")
+    style_text = "，".join(x for x in [pack.visual_style, pack.style] if x)
+    if style_text:
+        lines.append(f"画面风格：{style_text}")
+    if pack.scene is not None and pack.scene.name:
+        lines.append(f"场景：{pack.scene.name}")
+    if pack.characters:
+        lines.append(f"角色：{'、'.join(item.name for item in pack.characters)}")
+    lines.append("不要文字、编号和水印；每格构图完整，人物比例自然。")
+    return "\n".join(lines)

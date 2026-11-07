@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
 from app.core.contracts.video_generation import VideoRatio
+
 
 class VideoGenerationTaskRequest(BaseModel):
     """视频生成任务请求。"""
@@ -26,6 +28,7 @@ class VideoGenerationTaskRequest(BaseModel):
         None,
         description="reference 模式下与 images 一一对应的素材说明（如「角色「雷霆总监」：40岁…」），写进提示词的 [Image n] 行；为空时自动生成",
     )
+    audio_file_id: str | None = Field(None, description="配音 / 配乐参考文件 ID（音频文件，需有公网地址）；提示词里以 [Audio 1] 引用")
 
     ratio: VideoRatio = Field(..., description="视频画幅比例，如 16:9 / 9:16")
     # seconds 由 ShotDetail.duration 自动确定；请求体不再接收覆盖值。

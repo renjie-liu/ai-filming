@@ -13,11 +13,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.contracts.video_generation import (
+    VideoGenerationInput,
+    _strip_optional_b64,
+)
 from app.core.integrations.openai.video_payload import to_image_data_url
 from app.core.integrations.video_capabilities import resolve_effective_ratio
-from app.core.integrations.volcengine.video_capabilities import validate_volcengine_video_options
-from app.core.contracts.video_generation import VideoGenerationInput, _strip_optional_b64
-
+from app.core.integrations.volcengine.video_capabilities import (
+    validate_volcengine_video_options,
+)
 
 _SEEDANCE_VERSION_RE = re.compile(r"seedance-(\d+)-(\d+)")
 _SEEDANCE_20_DURATION_RANGE = (4, 15)
@@ -84,6 +88,10 @@ def build_content(input_: VideoGenerationInput) -> list[dict[str, Any]]:
         if not value:
             continue
         items.append({"type": "image_url", "role": "reference_image", "image_url": {"url": to_image_url_value(value)}})
+    audio = _strip_optional_b64(input_.reference_audio)
+    if audio:
+        # 音频参考只接受公网 URL / data URL（方舟按 URL 拉取；2.0 需同时带图片或视频，2.5 可单独驱动）
+        items.append({"type": "audio_url", "role": "reference_audio", "audio_url": {"url": audio}})
     return items
 
 

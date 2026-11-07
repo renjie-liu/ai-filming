@@ -56,7 +56,7 @@ async def file_id_to_data_url(db: AsyncSession, *, file_id: str) -> str:
         raise HTTPException(status_code=400, detail=f"Invalid image file_id: {file_id}")
     try:
         content = await storage.download_file(key=file_obj.storage_key)
-    except Exception:  # noqa: BLE001
+    except Exception:
         raise HTTPException(status_code=400, detail=f"Invalid image file_id: {file_id}") from None
     if not content:
         raise HTTPException(status_code=400, detail=f"Invalid image file_id: {file_id}")
@@ -65,7 +65,7 @@ async def file_id_to_data_url(db: AsyncSession, *, file_id: str) -> str:
     try:
         info = await storage.get_file_info(key=file_obj.storage_key)
         content_type = (info.content_type or "").strip().lower() or None
-    except Exception:  # noqa: BLE001
+    except Exception:
         content_type = None
     if not content_type:
         guessed_type, _ = mimetypes.guess_type(file_obj.storage_key)
@@ -87,6 +87,19 @@ async def file_id_to_image_url(db: AsyncSession, *, file_id: str) -> str:
     return await file_id_to_data_url(db, file_id=file_id)
 
 
+async def file_id_to_audio_url(db: AsyncSession, *, file_id: str) -> str:
+    """配音 / 配乐参考：必须是音频文件且有对象存储公网地址（方舟按 URL 拉取，不支持内联）。"""
+    file_obj = await db.get(FileItem, file_id)
+    if file_obj is None:
+        raise HTTPException(status_code=400, detail=f"Invalid audio file_id: {file_id}")
+    if str(getattr(file_obj.type, "value", file_obj.type) or "") != "audio":
+        raise HTTPException(status_code=400, detail=f"File is not audio: {file_id}")
+    url = str(file_obj.thumbnail or "").strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="Audio reference needs a public URL; re-upload the audio file")
+    return url
+
+
 async def preview_prompt_and_images(
     db: AsyncSession,
     *,
@@ -95,6 +108,7 @@ async def preview_prompt_and_images(
     prompt: str | None,
     images: list[str] | None = None,
     reference_labels: list[str] | None = None,
+    audio_file_id: str | None = None,
 ) -> tuple[str, list[str], dict | None, list[str]]:
     """渲染最终提示词，并返回参考图 file_id 列表、提示词上下文包与 reference 模式的 [Image n] 说明。"""
     await validate_shot_and_duration(db, shot_id)
@@ -105,6 +119,7 @@ async def preview_prompt_and_images(
         reference_mode=reference_mode,
         images=images,
         reference_labels=reference_labels,
+        audio_file_id=audio_file_id,
     )
     submission = await build_video_submission_payload(db, base=base, context=context)
     if not submission.prompt:
@@ -167,8 +182,9 @@ async def build_run_args(
     images: list[str],
     ratio: str | None,
     reference_labels: list[str] | None = None,
+    audio_file_id: str | None = None,
 ) -> dict:
-    """组装视频任务的运行参数：帧模式把帧图转 data URL；全能参考模式把参考图按公网 URL 透传。"""
+    """组装视频任务的运行参数：帧模式把帧图转 data URL；全能参考模式把参考图按公网 URL 透传；音频参考只接受公网 URL。"""
     model = await resolve_default_video_model(db)
     provider_cfg = await load_provider_config_by_model(db, model)
     shot_detail = await validate_shot_and_duration(db, shot_id)
@@ -180,9 +196,11 @@ async def build_run_args(
         reference_mode=reference_mode,
         images=images,
         reference_labels=reference_labels,
+        audio_file_id=audio_file_id,
     )
     submission = await build_video_submission_payload(db, base=base, context=context)
     validate_images_count(reference_mode, submission.images)
+    reference_audio = await file_id_to_audio_url(db, file_id=context.audio_file_id) if context.audio_file_id else None
 
     final_prompt = submission.prompt.strip()
     if not final_prompt:
@@ -208,6 +226,7 @@ async def build_run_args(
             "last_frame_base64": frame_map.get(ShotFrameType.last),
             "key_frame_base64": frame_map.get(ShotFrameType.key),
             "reference_images": reference_images,
+            "reference_audio": reference_audio,
             "model": model.name,
             "ratio": resolved_ratio,
             "seconds": shot_detail.duration,
@@ -339,7 +358,7 @@ async def run_video_generation_task(
             await recompute_shot_status(session, shot_id=shot_id)
             await session.commit()
             log_task_event("video_generation", task_id, "succeeded")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             await session.rollback()
             async with async_session_maker() as s2:
                 store = SqlAlchemyTaskStore(s2)

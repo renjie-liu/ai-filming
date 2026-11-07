@@ -29,9 +29,17 @@ ALLOWED_CONTENT_TYPES: tuple[str, ...] = (
     "video/mp4",
     "video/quicktime",
     "video/webm",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/mp4",
+    "audio/aac",
+    "audio/x-m4a",
 )
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac"}
 MAX_DIRECT_UPLOAD_BYTES = 500 * 1024 * 1024
 # 经函数上传（/files/upload）的建议上限：Vercel 请求体 4.5 MB，留出 multipart 开销
 MAX_SERVER_UPLOAD_BYTES = 4 * 1024 * 1024
@@ -46,12 +54,14 @@ def direct_upload_backend() -> str | None:
 
 
 def file_type_for_name(filename: str) -> FileType:
-    """按扩展名判断图片 / 视频；其它类型拒绝。"""
+    """按扩展名判断图片 / 视频 / 音频；其它类型拒绝。"""
     _, ext = os.path.splitext((filename or "").lower())
     if ext in IMAGE_EXTENSIONS:
         return FileType.image
     if ext in VIDEO_EXTENSIONS:
         return FileType.video
+    if ext in AUDIO_EXTENSIONS:
+        return FileType.audio
     raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext or '未知后缀'}")
 
 

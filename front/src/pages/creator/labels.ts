@@ -46,6 +46,23 @@ export const CAMERA_MOVEMENT_OPTIONS: Array<{ value: string; label: string }> = 
   { value: 'ZOOM_OUT', label: '变焦拉' },
 ]
 
+/** 角色多视角（后端 AssetViewAngle 大写 code）→ 中文；正面是主形象，其余由「生成三视图」派生。 */
+export const VIEW_ANGLE_LABEL: Record<string, string> = {
+  FRONT: '正面',
+  LEFT: '左侧面',
+  RIGHT: '右侧面',
+  BACK: '背面',
+  THREE_QUARTER: '四分之三侧面',
+  TOP: '俯视',
+}
+
+/** 「生成三视图」默认派生的视角（请求体用小写 code）。 */
+export const DEFAULT_CHARACTER_VIEWS: Array<'left' | 'back'> = ['left', 'back']
+
+export function viewAngleLabel(code: string): string {
+  return VIEW_ANGLE_LABEL[code.toUpperCase()] ?? code
+}
+
 export function cameraShotLabel(code: string): string {
   return CAMERA_SHOT_OPTIONS.find((o) => o.value === code)?.label ?? ''
 }

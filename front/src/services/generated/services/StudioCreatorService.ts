@@ -7,9 +7,14 @@ import type { ApiResponse_AttachedVideoRead_ } from '../models/ApiResponse_Attac
 import type { ApiResponse_CreatorEntityCreatedRead_ } from '../models/ApiResponse_CreatorEntityCreatedRead_';
 import type { ApiResponse_EntityShotsWrite_ } from '../models/ApiResponse_EntityShotsWrite_';
 import type { ApiResponse_NoneType_ } from '../models/ApiResponse_NoneType_';
+import type { ApiResponse_ShotAudioRead_ } from '../models/ApiResponse_ShotAudioRead_';
+import type { ApiResponse_TaskIdRead_ } from '../models/ApiResponse_TaskIdRead_';
+import type { ApiResponse_TaskIdsRead_ } from '../models/ApiResponse_TaskIdsRead_';
+import type { CharacterViewsRequest } from '../models/CharacterViewsRequest';
 import type { CreatorEntityCreate } from '../models/CreatorEntityCreate';
 import type { EntityShotsWrite } from '../models/EntityShotsWrite';
 import type { FileAttachRequest } from '../models/FileAttachRequest';
+import type { PreviewGridRequest } from '../models/PreviewGridRequest';
 import type { ShotEntityLinksWrite } from '../models/ShotEntityLinksWrite';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -170,6 +175,102 @@ export class StudioCreatorService {
             },
             body: requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 创作模式：以正面形象为参考派生侧面 / 背面等视角（每个视角一个图片任务）
+     * @returns ApiResponse_TaskIdsRead_ Successful Response
+     * @throws ApiError
+     */
+    public static generateCharacterViewsApiApiV1StudioCreatorEntitiesCharacterCharacterIdViewsPost({
+        characterId,
+        requestBody,
+    }: {
+        characterId: string,
+        requestBody: CharacterViewsRequest,
+    }): CancelablePromise<ApiResponse_TaskIdsRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/creator/entities/character/{character_id}/views',
+            path: {
+                'character_id': characterId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 创作模式：生成预演四宫格（一张 2×2 图看四个节拍）
+     * @returns ApiResponse_TaskIdRead_ Successful Response
+     * @throws ApiError
+     */
+    public static generatePreviewGridApiApiV1StudioCreatorShotsShotIdPreviewGridPost({
+        shotId,
+        requestBody,
+    }: {
+        shotId: string,
+        requestBody: PreviewGridRequest,
+    }): CancelablePromise<ApiResponse_TaskIdRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/creator/shots/{shot_id}/preview-grid',
+            path: {
+                'shot_id': shotId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 创作模式：把上传的音频设为镜头的配音 / 配乐参考
+     * @returns ApiResponse_ShotAudioRead_ Successful Response
+     * @throws ApiError
+     */
+    public static attachShotAudioApiApiV1StudioCreatorShotsShotIdAudioFromFilePost({
+        shotId,
+        requestBody,
+    }: {
+        shotId: string,
+        requestBody: FileAttachRequest,
+    }): CancelablePromise<ApiResponse_ShotAudioRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/creator/shots/{shot_id}/audio-from-file',
+            path: {
+                'shot_id': shotId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 创作模式：清除镜头的配音 / 配乐参考
+     * @returns ApiResponse_ShotAudioRead_ Successful Response
+     * @throws ApiError
+     */
+    public static clearShotAudioApiApiV1StudioCreatorShotsShotIdAudioDelete({
+        shotId,
+    }: {
+        shotId: string,
+    }): CancelablePromise<ApiResponse_ShotAudioRead_> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/studio/creator/shots/{shot_id}/audio',
+            path: {
+                'shot_id': shotId,
+            },
             errors: {
                 422: `Validation Error`,
             },

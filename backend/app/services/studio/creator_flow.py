@@ -45,6 +45,7 @@ from app.models.studio import (
     ShotFrameType,
     ShotStatus,
 )
+from app.models.studio_file_usages import FileUsage
 from app.models.task import GenerationTask
 from app.models.task_links import GenerationTaskLink
 from app.models.types import FileUsageKind
@@ -54,16 +55,34 @@ from app.schemas.studio.creator import (
     CreatorChapterRead,
     CreatorDialogueLineRead,
     CreatorEntityRead,
+    CreatorEntityViewRead,
+    CreatorImageCandidateRead,
     CreatorProjectRead,
     CreatorShotRead,
     CreatorSummaryRead,
     CreatorTaskRead,
     ProjectOverviewRead,
 )
+from app.schemas.studio.shots import ShotLinkedAssetItem
 from app.services.common import entity_not_found
 from app.services.studio.entity_crud import create_entity
 from app.services.studio.entity_thumbnails import download_url
 from app.services.studio.file_usages import sync_usage_from_shot_context
+from app.services.studio.generation.asset_image import (
+    build_asset_image_context,
+    build_character_image_base_draft,
+    derive_asset_image_preview,
+)
+from app.services.studio.generation.frame import (
+    build_frame_base_draft,
+    build_frame_context,
+    build_frame_submission_payload,
+)
+from app.services.studio.image_task_references import (
+    resolve_reference_image_refs_by_file_ids,
+)
+from app.services.studio.image_task_runner import create_image_task_and_link
+from app.services.studio.shot_assets_overview import get_shot_assets_overview
 from app.services.studio.shot_extracted_candidates import (
     mark_linked,
     mark_linked_by_name,
@@ -74,6 +93,10 @@ from app.services.studio.shot_preparation_state import (
     link_existing_asset_for_preparation,
 )
 from app.services.studio.shot_status import recompute_shot_status
+from app.services.studio.shot_video_prompt_pack import (
+    build_preview_grid_prompt,
+    build_shot_video_prompt_pack,
+)
 from app.utils.project_links import upsert_project_link
 
 # 候选类型 → 实体模型 / 项目关联模型 / 图片模型 / 图片表上的外键字段
@@ -259,6 +282,60 @@ async def _latest_tasks(db: AsyncSession, *, relation_type: str, entity_ids: lis
     return out
 
 
+async def _task_files(db: AsyncSession, *, relation_type: str, entity_ids: list[str]) -> dict[str, list[tuple[str, str, str | None]]]:
+    """每个 relation_entity_id 的历史生成文件（任务成功落盘的那些），新 → 旧：{entity_id: [(file_id, task_id, created_at)]}。
+
+    为什么存在：每次图片生成的结果都保留在任务关联表里，这就是「多候选选一张 / 历史回退」的数据来源，不需要新表。
+    """
+    if not entity_ids:
+        return {}
+    stmt = (
+        select(GenerationTaskLink.relation_entity_id, GenerationTaskLink.file_id, GenerationTask.id, GenerationTask.created_at)
+        .join(GenerationTask, GenerationTask.id == GenerationTaskLink.task_id)
+        .where(
+            GenerationTaskLink.relation_type == relation_type,
+            GenerationTaskLink.relation_entity_id.in_(entity_ids),
+            GenerationTaskLink.file_id.is_not(None),
+        )
+        .order_by(GenerationTask.created_at.desc(), GenerationTaskLink.id.desc())
+    )
+    out: dict[str, list[tuple[str, str, str | None]]] = defaultdict(list)
+    for entity_id, file_id, task_id, created_at in (await db.execute(stmt)).all():
+        out[entity_id].append((str(file_id), str(task_id), created_at.isoformat() if created_at else None))
+    return out
+
+
+MAX_IMAGE_CANDIDATES = 8
+
+
+def _candidate_rows(
+    current_file: str | None,
+    history: list[tuple[str, str, str | None]],
+    extra_files: list[str] | None = None,
+) -> list[tuple[str, str | None, str | None, bool]]:
+    """候选列表：当前用的那张排第一，其后按新 → 旧的历史（去重），再补上传图；最多 MAX_IMAGE_CANDIDATES 张。"""
+    out: list[tuple[str, str | None, str | None, bool]] = []
+    seen: set[str] = set()
+    if current_file:
+        hit = next(((t, c) for f, t, c in history if f == current_file), (None, None))
+        out.append((current_file, hit[0], hit[1], True))
+        seen.add(current_file)
+    for file_id, task_id, created_at in history:
+        if file_id in seen:
+            continue
+        seen.add(file_id)
+        out.append((file_id, task_id, created_at, False))
+    for file_id in extra_files or []:
+        if file_id and file_id not in seen:
+            seen.add(file_id)
+            out.append((file_id, None, None, False))
+    return out[:MAX_IMAGE_CANDIDATES]
+
+
+def _candidate_reads(rows: list[tuple[str, str | None, str | None, bool]], urls: dict[str, str]) -> list[CreatorImageCandidateRead]:
+    return [CreatorImageCandidateRead(file_id=f, url=urls.get(f, ""), task_id=t, created_at=c, is_current=cur) for f, t, c, cur in rows]
+
+
 async def _file_urls(db: AsyncSession, file_ids: list[str]) -> dict[str, str]:
     """文件 ID → 可直接访问的地址：优先对象存储公网地址（thumbnail），否则走下载接口。"""
     ids = [f for f in set(file_ids) if f]
@@ -334,14 +411,35 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
                 if shot.id not in shot_ids_by_entity[eid]:
                     shot_ids_by_entity[eid].append(shot.id)
 
-    # 首帧图片 / 任务
-    frames = (await db.execute(select(ShotFrameImage).where(ShotFrameImage.shot_detail_id.in_(shot_ids), ShotFrameImage.frame_type == ShotFrameType.first))).scalars().all() if shot_ids else []
+    # 首帧（关键帧）与 key 帧（预演四宫格）图片 / 任务 / 历史候选
+    all_frames = (
+        (await db.execute(select(ShotFrameImage).where(ShotFrameImage.shot_detail_id.in_(shot_ids), ShotFrameImage.frame_type.in_([ShotFrameType.first, ShotFrameType.key])))).scalars().all()
+        if shot_ids
+        else []
+    )
+    frames = [f for f in all_frames if f.frame_type == ShotFrameType.first]
     frame_by_shot = {f.shot_detail_id: f for f in frames}
-    frame_image_tasks = await _latest_tasks(db, relation_type="shot_frame_image", entity_ids=[str(f.id) for f in frames])
+    grid_by_shot = {f.shot_detail_id: f for f in all_frames if f.frame_type == ShotFrameType.key}
+    frame_image_tasks = await _latest_tasks(db, relation_type="shot_frame_image", entity_ids=[str(f.id) for f in all_frames])
+    frame_history = await _task_files(db, relation_type="shot_frame_image", entity_ids=[str(f.id) for f in frames])
+    keyframe_candidates = {f.shot_detail_id: _candidate_rows(f.file_id, frame_history.get(str(f.id), [])) for f in frames}
     prompt_tasks = await _latest_tasks(db, relation_type="shot_first_frame_prompt", entity_ids=shot_ids)
     video_tasks = await _latest_tasks(db, relation_type="video", entity_ids=shot_ids)
 
-    file_ids = [f.file_id for f in frames if f.file_id] + [s.generated_video_file_id for s in shots if s.generated_video_file_id]
+    # 配音 / 配乐参考：按镜头取最近一条 reference_audio 用途记录
+    audio_by_shot: dict[str, str] = {}
+    if shot_ids:
+        audio_stmt = (
+            select(FileUsage.shot_id, FileUsage.file_id)
+            .where(FileUsage.shot_id.in_(shot_ids), FileUsage.usage_kind == FileUsageKind.reference_audio.value)
+            .order_by(FileUsage.id.desc())
+        )
+        for shot_id_value, file_id_value in (await db.execute(audio_stmt)).all():
+            audio_by_shot.setdefault(str(shot_id_value), str(file_id_value))
+
+    file_ids = [f.file_id for f in all_frames if f.file_id] + [s.generated_video_file_id for s in shots if s.generated_video_file_id]
+    file_ids += list(audio_by_shot.values())
+    file_ids += [row[0] for rows in keyframe_candidates.values() for row in rows]
 
     # 实体与形象图
     entities: list[CreatorEntityRead] = []
@@ -355,6 +453,13 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
         db, relation_type="character_image", entity_ids=[str(i.id) for imgs in char_images.values() for i in imgs]
     )
     char_task_by_entity = await _latest_tasks(db, relation_type="character", entity_ids=character_ids)
+    # 历史候选：角色级任务 + 正面形象图行的任务；其它视角（侧面 / 背面）单独列为 views
+    char_front_rows = {cid: [i for i in imgs if _enum_value(i.view_angle) == AssetViewAngle.front.value] for cid, imgs in char_images.items()}
+    char_view_rows = {cid: [i for i in imgs if _enum_value(i.view_angle) != AssetViewAngle.front.value] for cid, imgs in char_images.items()}
+    char_history_entity = await _task_files(db, relation_type="character", entity_ids=character_ids)
+    char_history_images = await _task_files(db, relation_type="character_image", entity_ids=[str(i.id) for rows in char_front_rows.values() for i in rows])
+    entity_candidates: dict[str, list[tuple[str, str | None, str | None, bool]]] = {}
+    entity_views: dict[str, list[tuple[str, int, str | None]]] = {}
     shot_count_by_entity: dict[str, int] = {eid: len(ids) for eid, ids in shot_ids_by_entity.items()}
     char_names: dict[str, str] = {}
     # 本集用到的排前面，未用到的（沿用自其它集）排后面
@@ -364,6 +469,15 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
         if best is not None and best.file_id:
             file_ids.append(best.file_id)
         task = (entity_image_tasks["character"].get(str(best.id)) if best is not None else None) or char_task_by_entity.get(ch.id)
+        history = list(char_history_entity.get(ch.id, []))
+        for row in char_front_rows.get(ch.id, []):
+            history += char_history_images.get(str(row.id), [])
+        history.sort(key=lambda item: item[2] or "", reverse=True)
+        entity_candidates[ch.id] = _candidate_rows(
+            best.file_id if best is not None else None, history, [row.file_id for row in char_front_rows.get(ch.id, []) if row.file_id]
+        )
+        entity_views[ch.id] = [(_enum_value(row.view_angle), int(row.id), row.file_id) for row in sorted(char_view_rows.get(ch.id, []), key=lambda r: r.id)]
+        file_ids += [row[0] for row in entity_candidates[ch.id]] + [fid for _a, _i, fid in entity_views[ch.id] if fid]
         entities.append(
             CreatorEntityRead(
                 type="character",
@@ -388,11 +502,20 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
         for img in (await db.execute(select(image_model).where(getattr(image_model, fk).in_(ids)))).scalars().all():
             images[getattr(img, fk)].append(img)
         tasks = await _latest_tasks(db, relation_type=f"{entity_type}_image", entity_ids=[str(i.id) for imgs in images.values() for i in imgs])
+        asset_history = await _task_files(db, relation_type=f"{entity_type}_image", entity_ids=[str(i.id) for imgs in images.values() for i in imgs])
         for row in sorted(rows, key=lambda r: (shot_count_by_entity.get(r.id, 0) == 0, r.name)):
             best = _best_image(images.get(row.id, []))
             if best is not None and best.file_id:
                 file_ids.append(best.file_id)
                 asset_best_file[row.id] = best.file_id
+            history: list[tuple[str, str, str | None]] = []
+            for img in images.get(row.id, []):
+                history += asset_history.get(str(img.id), [])
+            history.sort(key=lambda item: item[2] or "", reverse=True)
+            entity_candidates[row.id] = _candidate_rows(
+                best.file_id if best is not None else None, history, [img.file_id for img in images.get(row.id, []) if img.file_id]
+            )
+            file_ids += [item[0] for item in entity_candidates[row.id]]
             entities.append(
                 CreatorEntityRead(
                     type=entity_type,  # type: ignore[arg-type]
@@ -414,10 +537,17 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
             best = _best_image(char_images.get(ent.id, []))
             if best is not None and best.file_id:
                 ent.thumbnail = urls.get(best.file_id, "")
+            ent.views = [
+                CreatorEntityViewRead(
+                    view_angle=angle, image_id=image_id, file_id=fid, url=urls.get(fid, "") if fid else "", task=entity_image_tasks["character"].get(str(image_id))
+                )
+                for angle, image_id, fid in entity_views.get(ent.id, [])
+            ]
         else:
             fid = asset_best_file.get(ent.id)
             if fid:
                 ent.thumbnail = urls.get(fid, "")
+        ent.image_candidates = _candidate_reads(entity_candidates.get(ent.id, []), urls)
 
     shot_reads: list[CreatorShotRead] = []
     keyframe_count = video_done = total_seconds = ready_count = 0
@@ -442,6 +572,8 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
             )
             for line in lines_by_shot.get(shot.id, [])
         ]
+        grid = grid_by_shot.get(shot.id)
+        audio_file_id = audio_by_shot.get(shot.id)
         shot_reads.append(
             CreatorShotRead(
                 id=shot.id,
@@ -463,6 +595,11 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
                 keyframe_url=urls.get(keyframe_file_id) if keyframe_file_id else None,
                 keyframe_prompt_task=prompt_tasks.get(shot.id),
                 keyframe_image_task=frame_image_tasks.get(str(frame.id)) if frame is not None else None,
+                keyframe_candidates=_candidate_reads(keyframe_candidates.get(shot.id, []), urls),
+                preview_grid_url=urls.get(grid.file_id) if grid is not None and grid.file_id else None,
+                preview_grid_task=frame_image_tasks.get(str(grid.id)) if grid is not None else None,
+                audio_file_id=audio_file_id,
+                audio_url=urls.get(audio_file_id) if audio_file_id else None,
                 video_file_id=shot.generated_video_file_id,
                 video_url=urls.get(shot.generated_video_file_id) if shot.generated_video_file_id else None,
                 video_task=video_tasks.get(shot.id),
@@ -705,8 +842,10 @@ def _file_format(file: FileItem) -> str:
 async def attach_entity_image(db: AsyncSession, *, entity_type: str, entity_id: str, file_id: str) -> int:
     """把已上传的文件设为实体的形象 / 参考图，并成为卡片展示与关键帧 / 视频参考用的「最佳图」。
 
-    - 角色：新建一张正面 CharacterImage 并设为主图（其它主图取消）；
-    - 场景 / 道具 / 服装：图片行按 (实体, 精度, 角度) 唯一，直接把文件写进当前展示的那一行（无行时新建正面图）。
+    所有图片表都按 (实体, 精度, 角度) 唯一，所以不会为同一角度新插一行：
+    - 角色：已有同一文件的正面行则直接设为主图（「采用」历史候选）；否则把文件写进当前展示的正面行并设为主图；
+      没有正面行时才新建。其它视角（侧面 / 背面）的行不动。历史文件仍在任务关联表里，候选列表不受覆盖影响。
+    - 场景 / 道具 / 服装：直接把文件写进当前展示的那一行（无行时新建正面图）。
     返回图片行 ID。
     """
     et = _require_entity_type(entity_type)
@@ -717,8 +856,19 @@ async def attach_entity_image(db: AsyncSession, *, entity_type: str, entity_id: 
     if et == "character":
         if await db.get(Character, entity_id) is None:
             raise ValueError(entity_not_found("Character"))
-        for img in (await db.execute(select(CharacterImage).where(CharacterImage.character_id == entity_id, CharacterImage.is_primary.is_(True)))).scalars().all():
-            img.is_primary = False
+        rows = list((await db.execute(select(CharacterImage).where(CharacterImage.character_id == entity_id))).scalars().all())
+        for img in rows:
+            if img.is_primary:
+                img.is_primary = False
+        front_rows = [r for r in rows if _enum_value(r.view_angle) == AssetViewAngle.front.value]
+        existing = next((r for r in front_rows if r.file_id == file_id), None) or _best_image(front_rows)
+        if existing is not None:
+            if existing.file_id != file_id:
+                existing.file_id = file_id
+                existing.format = fmt
+            existing.is_primary = True
+            await db.flush()
+            return int(existing.id)
         image: Any = CharacterImage(
             character_id=entity_id, file_id=file_id, quality_level=AssetQualityLevel.low, view_angle=AssetViewAngle.front, format=fmt, is_primary=True
         )
@@ -775,6 +925,118 @@ async def attach_shot_video(db: AsyncSession, *, shot_id: str, file_id: str) -> 
     await sync_usage_from_shot_context(
         db, file_id=file_id, shot_id=shot_id, usage_kind=FileUsageKind.generated_video, source_ref=f"shot:{shot_id}:uploaded_video"
     )
+    await db.flush()
+    return file_id
+
+
+CHARACTER_VIEW_PROMPTS: dict[str, tuple[AssetViewAngle, str]] = {
+    "left": (AssetViewAngle.left, "侧面 90 度视角，人物面向画面左侧，全身"),
+    "right": (AssetViewAngle.right, "侧面 90 度视角，人物面向画面右侧，全身"),
+    "back": (AssetViewAngle.back, "正后方背面视角，全身，看得到发型与服装背面"),
+    "three_quarter": (AssetViewAngle.three_quarter, "四分之三侧面视角，微微转向画面右侧，全身"),
+}
+
+
+async def generate_character_views(db: AsyncSession, *, character_id: str, views: list[str]) -> list[str]:
+    """以当前正面形象为参考，派生其它视角的形象图（每个视角一个图片任务，写入对应 view_angle 的 CharacterImage 行）。
+
+    为什么存在：多视图参考能让视频模型在转身、侧脸镜头里也认出同一个人（LibTV「角色三视图」、即梦多形态资产的做法）。
+    返回任务 ID 列表；任务创建即已提交并入队。
+    """
+    character = await db.get(Character, character_id)
+    if character is None:
+        raise ValueError(entity_not_found("Character"))
+    rows = list((await db.execute(select(CharacterImage).where(CharacterImage.character_id == character_id))).scalars().all())
+    primary = _best_image([r for r in rows if _enum_value(r.view_angle) == AssetViewAngle.front.value])
+    if primary is None or not primary.file_id:
+        raise CreatorInputError("Character has no front portrait yet; generate or upload one first")
+    base = await build_character_image_base_draft(db, character_id=character_id, image_id=None)
+    base_prompt = derive_asset_image_preview(base=base, context=build_asset_image_context(base=base)).prompt.strip()
+    refs = await resolve_reference_image_refs_by_file_ids(db, file_ids=[primary.file_id])
+    task_ids: list[str] = []
+    for view in views:
+        if view not in CHARACTER_VIEW_PROMPTS:
+            raise CreatorInputError(f"unsupported view: {view}")
+        angle, instruction = CHARACTER_VIEW_PROMPTS[view]
+        row = next((r for r in rows if _enum_value(r.view_angle) == angle.value), None)
+        if row is None:
+            row = CharacterImage(character_id=character_id, file_id=None, quality_level=AssetQualityLevel.low, view_angle=angle, format="png", is_primary=False)
+            db.add(row)
+            await db.flush()
+            await db.refresh(row)
+            rows.append(row)
+        prompt = f"{base_prompt}\n\n视角要求：{instruction}。与参考图是同一个人：脸型、发型、肤色、服装、体型完全一致；纯色干净背景，无文字。"
+        task_ids.append(
+            await create_image_task_and_link(
+                db=db,
+                model_id=None,
+                relation_type="character_image",
+                relation_entity_id=str(row.id),
+                prompt=prompt,
+                images=refs or None,
+                purpose="character_view",
+            )
+        )
+    return task_ids
+
+
+async def generate_preview_grid(db: AsyncSession, *, shot_id: str, ratio: str | None = None) -> str:
+    """生成镜头的「预演四宫格」：一张 2×2 图按时间顺序演四个节拍，落到 ShotFrameImage(key)。返回任务 ID。
+
+    为什么存在：生视频前先用一次图片费用检查节奏、构图与人物连续性（LibTV 剧情推演四宫格 / 即梦白模预演的廉价版）。
+    """
+    detail = await db.get(ShotDetail, shot_id)
+    if detail is None:
+        raise ValueError(entity_not_found("ShotDetail"))
+    pack = await build_shot_video_prompt_pack(db, shot_id=shot_id)
+    overview = await get_shot_assets_overview(db, shot_id=shot_id)
+    items = [
+        ShotLinkedAssetItem(type=item.type, id=str(item.linked_entity_id), image_id=None, file_id=item.file_id, name=item.name, thumbnail=item.thumbnail or "")
+        for item in overview.items
+        if getattr(item, "is_linked", False) and item.file_id and item.linked_entity_id
+    ]
+    grid_stmt = select(ShotFrameImage).where(ShotFrameImage.shot_detail_id == shot_id, ShotFrameImage.frame_type == ShotFrameType.key).limit(1)
+    row = (await db.execute(grid_stmt)).scalars().first()
+    if row is None:
+        row = ShotFrameImage(shot_detail_id=shot_id, frame_type=ShotFrameType.key, file_id=None, format="png")
+        db.add(row)
+        await db.flush()
+        await db.refresh(row)
+    base = build_frame_base_draft(shot_id=shot_id, frame_type=ShotFrameType.key, prompt=build_preview_grid_prompt(pack))
+    context = build_frame_context(shot_id=shot_id, frame_type=ShotFrameType.key, items=items)
+    submission = build_frame_submission_payload(base=base, context=context)
+    refs = await resolve_reference_image_refs_by_file_ids(db, file_ids=submission.images)
+    return await create_image_task_and_link(
+        db=db,
+        model_id=None,
+        relation_type="shot_frame_image",
+        relation_entity_id=str(row.id),
+        prompt=submission.prompt,
+        images=refs or None,
+        target_ratio=ratio or "1:1",
+        resolution_profile="standard",
+        purpose="storyboard_preview",
+        render_context=dict(submission.extra or {}).get("render_context"),
+    )
+
+
+async def attach_shot_audio(db: AsyncSession, *, shot_id: str, file_id: str | None) -> str | None:
+    """设置 / 清除镜头的配音或配乐参考：记录为 reference_audio 用途（镜头本身没有音频字段，用途表即是关联）。"""
+    shot = await db.get(Shot, shot_id)
+    if shot is None:
+        raise ValueError(entity_not_found("Shot"))
+    existing = (await db.execute(select(FileUsage).where(FileUsage.shot_id == shot_id, FileUsage.usage_kind == FileUsageKind.reference_audio.value))).scalars().all()
+    for usage in existing:
+        await db.delete(usage)
+    await db.flush()
+    if not file_id:
+        return None
+    file = await db.get(FileItem, file_id)
+    if file is None:
+        raise ValueError(entity_not_found("FileItem"))
+    if _enum_value(file.type) != "audio":
+        raise CreatorInputError("file is not audio")
+    await sync_usage_from_shot_context(db, file_id=file_id, shot_id=shot_id, usage_kind=FileUsageKind.reference_audio, source_ref=f"shot:{shot_id}:reference_audio")
     await db.flush()
     return file_id
 

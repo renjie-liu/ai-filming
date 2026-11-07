@@ -1,12 +1,13 @@
 import type { CreatorBoardRead, CreatorEntityRead, CreatorShotRead } from '../../services/generated'
 import { linkedEntities } from './actions'
+import { viewAngleLabel } from './labels'
 
 /**
  * 视频参考方式的纯逻辑：哪些素材可以当参考、默认用哪种模式、确认单上怎么描述。
  *
  * 为什么存在：Seedance 2.x 的全能参考（最多 9 张图，提示词按 [Image n] 点名）是跨镜头不换脸的关键；
  * 这里的候选顺序与后端 `collect_reference_candidates` 一致（角色 → 场景 → 道具 → 服装 → 关键帧），
- * 预览提示词和真正提交用同一份清单。
+ * 角色的侧面 / 背面视图紧跟在该角色正面之后（后端清单不含视图，前端把它们一并点名，预览与提交用同一份）。
  */
 
 export type VideoMode = 'reference' | 'first' | 'text_only'
@@ -31,7 +32,7 @@ export const VIDEO_MODE_HINT: Record<VideoMode, string> = {
 
 const TYPE_LABEL: Record<CreatorEntityRead['type'], string> = { character: '角色', scene: '场景', prop: '道具', costume: '服装' }
 
-/** 镜头可用的参考素材清单（只取有形象图的关联实体 + 关键帧）。 */
+/** 镜头可用的参考素材清单（只取有形象图的关联实体 + 角色已生成的其它视角 + 关键帧）。 */
 export function referenceCandidates(shot: CreatorShotRead, board: CreatorBoardRead): VideoReference[] {
   const seen = new Set<string>()
   const out: VideoReference[] = []
@@ -46,6 +47,11 @@ export function referenceCandidates(shot: CreatorShotRead, board: CreatorBoardRe
       name: e.name,
       thumbnail: e.thumbnail || null,
     })
+    for (const v of e.views) {
+      if (!v.file_id || seen.has(v.file_id)) continue
+      seen.add(v.file_id)
+      out.push({ file_id: v.file_id, label: `${TYPE_LABEL[e.type]}「${e.name}」${viewAngleLabel(v.view_angle)}（同一人）`, kind: e.type, name: e.name, thumbnail: v.url || null })
+    }
   }
   if (shot.keyframe_file_id && !seen.has(shot.keyframe_file_id)) {
     out.push({ file_id: shot.keyframe_file_id, label: '本镜头关键帧（构图与起始状态）', kind: 'keyframe', name: '关键帧', thumbnail: shot.keyframe_url })

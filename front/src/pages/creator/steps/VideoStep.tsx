@@ -1,10 +1,10 @@
 import type React from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Checkbox, Drawer, Input, Progress, Segmented, Table, Tag, message } from 'antd'
+import { Button, Card, Checkbox, Drawer, Input, Popconfirm, Progress, Segmented, Table, Tag, message } from 'antd'
 import type { CreatorBoardRead, CreatorShotRead } from '../../../services/generated'
 import { useIsMobile } from '../../../hooks/useIsMobile'
 import { localizeErrorMessage } from '../../../utils/errorMessage'
-import { generateVideo, isRealPersonRejection, previewVideoPrompt, resolveRatio, uploadShotVideo, type VideoPlan, type VideoRatio } from '../actions'
+import { clearShotAudio, generateVideo, isRealPersonRejection, previewVideoPrompt, resolveRatio, uploadShotAudio, uploadShotVideo, type VideoPlan, type VideoRatio } from '../actions'
 import ImagePickButton from '../ImagePickButton'
 import { ArtBox, DurationBadge, IndexBadge, TaskTag, taskErrorText } from '../ui'
 import { isActiveStatus } from '../taskPolling'
@@ -13,7 +13,8 @@ import { VIDEO_MODE_HINT, VIDEO_MODE_LABEL, defaultVideoMode, describeVideoMode,
 /**
  * 第 4 步 · 视频：先出确认单，开始后变成进度板；失败可单独重试。
  *
- * 每个镜头可以打开抽屉：选参考方式（形象参考 / 首帧图 / 仅文字）、勾选参考素材、
+ * 每个镜头可以打开抽屉：选参考方式（形象参考 / 首帧图 / 仅文字）、勾选参考素材（含角色的侧面 / 背面视图）、
+ * 上传配音 / 配乐作为音频参考（提示词里 [Audio 1]，模型按它的节奏与情绪生成）、
  * 看并改最终发给模型的提示词，或者直接上传自己的视频片段作为成片。
  */
 
@@ -35,12 +36,13 @@ export function videoStarted(board: CreatorBoardRead): boolean {
 
 /** 把「模式 + 勾选的素材」变成提交方案；素材不够时自动降级（形象参考 → 首帧 → 仅文字）。 */
 function planFor(shot: CreatorShotRead, board: CreatorBoardRead, mode: VideoMode, selected?: string[]): VideoPlan {
+  const audioFileId = shot.audio_file_id ?? null
   if (mode === 'reference') {
     const refs = referenceCandidates(shot, board).filter((r) => !selected || selected.includes(r.file_id))
-    if (refs.length > 0) return { mode: 'reference', images: refs.map((r) => r.file_id), labels: refs.map((r) => r.label) }
+    if (refs.length > 0) return { mode: 'reference', images: refs.map((r) => r.file_id), labels: refs.map((r) => r.label), audioFileId }
   }
-  if (mode !== 'text_only' && shot.keyframe_file_id) return { mode: 'first', images: [shot.keyframe_file_id] }
-  return { mode: 'text_only', images: [] }
+  if (mode !== 'text_only' && shot.keyframe_file_id) return { mode: 'first', images: [shot.keyframe_file_id], audioFileId }
+  return { mode: 'text_only', images: [], audioFileId }
 }
 
 /** 单个镜头的视频设置抽屉。 */
@@ -72,6 +74,7 @@ const VideoDrawer: React.FC<{
   }, [shotId])
 
   const selectedKey = selected.join(',')
+  const audioKey = shot?.audio_file_id ?? ''
   useEffect(() => {
     if (!shot || promptDirty) return
     let cancelled = false
@@ -90,13 +93,29 @@ const VideoDrawer: React.FC<{
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shotId, mode, selectedKey, promptDirty])
+  }, [shotId, mode, selectedKey, promptDirty, audioKey])
 
   if (!shot) return <Drawer open={false} onClose={onClose} />
 
   const plan = planFor(shot, board, mode, selected)
   const effectiveMode = plan.mode as VideoMode
   const active = shot.video_task && isActiveStatus(shot.video_task.status)
+  const uploadAudio = async (file: File) => {
+    await uploadShotAudio(shot, file, { projectId: board.project.id, chapterId: board.chapter.id })
+    await onChanged()
+    setPromptDirty(false)
+    message.success('已设为这个镜头的配音 / 配乐参考')
+  }
+  const removeAudio = async () => {
+    try {
+      await clearShotAudio(shot)
+      await onChanged()
+      setPromptDirty(false)
+      message.success('已移除音频参考')
+    } catch (e) {
+      message.error(errText(e, '移除失败'))
+    }
+  }
 
   const generate = async () => {
     setGenerating(true)
@@ -164,6 +183,25 @@ const VideoDrawer: React.FC<{
             </Checkbox.Group>
           </div>
         )}
+
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-gray-500">配音 / 配乐参考（可选）</span>
+          {shot.audio_url ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <audio controls src={shot.audio_url} className="h-8 max-w-[260px]" data-testid="shot-audio" />
+              <Popconfirm title="移除音频参考？" okText="移除" cancelText="取消" onConfirm={() => void removeAudio()}>
+                <Button size="small" type="text" danger disabled={!!active}>移除</Button>
+              </Popconfirm>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 flex-wrap">
+              <ImagePickButton onPick={uploadAudio} size="small" accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/x-m4a,.mp3,.wav,.m4a,.aac" disabled={!!active}>
+                上传配音 / 配乐
+              </ImagePickButton>
+              <span className="text-xs text-gray-400">mp3 / wav / m4a；模型会按它的节奏、情绪生成，台词口型与之对齐。</span>
+            </div>
+          )}
+        </div>
 
         <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between">
@@ -290,7 +328,10 @@ const VideoStep: React.FC<Props> = ({ board, onBack, onFinal, onTaskStarted, onC
                 width: 200,
                 render: (_: unknown, r: CreatorShotRead) => (
                   <span className="inline-flex items-center gap-2">
-                    <span className={defaultVideoMode(r, board) === 'text_only' ? 'text-gray-400' : ''}>{describeVideoMode(r, board)}</span>
+                    <span className={defaultVideoMode(r, board) === 'text_only' ? 'text-gray-400' : ''}>
+              {describeVideoMode(r, board)}
+              {r.audio_file_id ? ' + 音频' : ''}
+            </span>
                     <Button size="small" type="link" className="px-0" onClick={() => setEditingId(r.id)}>调整</Button>
                   </span>
                 ),

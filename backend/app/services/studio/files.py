@@ -18,8 +18,20 @@ from app.api.utils import apply_keyword_filter, apply_order, paginate
 from app.core import storage
 from app.models.studio import FileItem, FileType
 from app.schemas.common import ApiResponse, PaginatedData, paginated_response
-from app.schemas.studio import FileDetailRead, FileRead, FileUpdate, FileUsageRead, FileUsageWrite
-from app.services.common import create_and_refresh, entity_not_found, flush_and_refresh, get_or_404, patch_model
+from app.schemas.studio import (
+    FileDetailRead,
+    FileRead,
+    FileUpdate,
+    FileUsageRead,
+    FileUsageWrite,
+)
+from app.services.common import (
+    create_and_refresh,
+    entity_not_found,
+    flush_and_refresh,
+    get_or_404,
+    patch_model,
+)
 from app.services.studio.file_usages import upsert_file_usage
 
 FILE_ORDER_FIELDS = {"name", "created_at", "updated_at"}
@@ -31,6 +43,8 @@ def _detect_file_type(filename: str) -> FileType:
         return FileType.image
     if ext in {".mp4", ".mov", ".mkv", ".avi", ".webm"}:
         return FileType.video
+    if ext in {".mp3", ".wav", ".m4a", ".aac"}:
+        return FileType.audio
     raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext or '未知后缀'}")
 
 

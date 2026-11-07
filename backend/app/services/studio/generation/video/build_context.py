@@ -169,6 +169,7 @@ class VideoGenerationContext(GenerationContext):
     reference_mode: str
     images: list[str]
     reference_labels: list[str] = []
+    audio_file_id: str | None = None
     template_id: str | None = None
 
 
@@ -179,6 +180,7 @@ async def build_video_context(
     reference_mode: str,
     images: list[str] | None,
     reference_labels: list[str] | None = None,
+    audio_file_id: str | None = None,
     template_id: str | None = None,
 ) -> VideoGenerationContext:
     resolved_images = await resolve_video_reference_images(
@@ -195,5 +197,6 @@ async def build_video_context(
         reference_mode=reference_mode,
         images=resolved_images,
         reference_labels=labels,
+        audio_file_id=(audio_file_id or "").strip() or None,
         template_id=template_id,
     )

@@ -137,6 +137,7 @@ class FileType(str, Enum):
 
     image = "image"
     video = "video"
+    audio = "audio"
 
 
 class FileUsageKind(str, Enum):
@@ -149,6 +150,7 @@ class FileUsageKind(str, Enum):
     task_link = "task_link"
     upload = "upload"
     api = "api"
+    reference_audio = "reference_audio"  # 镜头的配音 / 配乐参考（Seedance reference_audio）
 
 
 class TimelineClipType(str, Enum):

@@ -27,6 +27,10 @@ export type VideoGenerationTaskRequest = {
      */
     reference_labels?: (Array<string> | null);
     /**
+     * 配音 / 配乐参考文件 ID（音频文件，需有公网地址）；提示词里以 [Audio 1] 引用
+     */
+    audio_file_id?: (string | null);
+    /**
      * 视频画幅比例，如 16:9 / 9:16
      */
     ratio: '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9';

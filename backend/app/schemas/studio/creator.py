@@ -35,6 +35,26 @@ class CreatorDialogueLineRead(_ReadModel):
     text: str = Field(..., description="台词")
 
 
+class CreatorImageCandidateRead(_ReadModel):
+    """一张可「采用」的图片：历史生成结果或上传图；is_current 表示当前正在用的那张。"""
+
+    file_id: str
+    url: str = ""
+    task_id: str | None = Field(None, description="来自哪次生成任务；上传图为空")
+    created_at: str | None = None
+    is_current: bool = False
+
+
+class CreatorEntityViewRead(_ReadModel):
+    """角色的一个视角形象（侧面 / 背面 …），用于多视图参考。"""
+
+    view_angle: str = Field(..., description="LEFT / RIGHT / BACK / THREE_QUARTER …")
+    image_id: int
+    file_id: str | None = None
+    url: str = ""
+    task: CreatorTaskRead | None = None
+
+
 class CreatorShotRead(_ReadModel):
     """创作页分镜卡所需的镜头信息。"""
 
@@ -57,6 +77,11 @@ class CreatorShotRead(_ReadModel):
     keyframe_url: str | None = Field(None, description="首帧图片地址")
     keyframe_prompt_task: CreatorTaskRead | None = Field(None, description="最近一次首帧提示词任务")
     keyframe_image_task: CreatorTaskRead | None = Field(None, description="最近一次首帧图片任务")
+    keyframe_candidates: list[CreatorImageCandidateRead] = Field(default_factory=list, description="关键帧候选 / 历史（当前在前，最多 8 张）")
+    preview_grid_url: str | None = Field(None, description="预演四宫格图片地址")
+    preview_grid_task: CreatorTaskRead | None = Field(None, description="最近一次预演四宫格任务")
+    audio_file_id: str | None = Field(None, description="配音 / 配乐参考文件 ID")
+    audio_url: str | None = Field(None, description="配音 / 配乐参考地址")
     video_file_id: str | None = Field(None, description="生成视频文件 ID")
     video_url: str | None = Field(None, description="生成视频地址")
     video_task: CreatorTaskRead | None = Field(None, description="最近一次视频任务")
@@ -75,6 +100,8 @@ class CreatorEntityRead(_ReadModel):
     image_task: CreatorTaskRead | None = Field(None, description="最近一次形象图任务")
     shot_count: int = Field(0, description="本章节内出现的镜头数；0 表示本集尚未用到（可能沿用自其它集）")
     shot_ids: list[str] = Field(default_factory=list, description="本章节内出现的镜头 ID")
+    image_candidates: list[CreatorImageCandidateRead] = Field(default_factory=list, description="形象 / 参考图候选与历史（当前在前，最多 8 张）")
+    views: list[CreatorEntityViewRead] = Field(default_factory=list, description="角色的其它视角形象（侧面 / 背面）")
 
 
 class CreatorProjectRead(_ReadModel):
@@ -179,6 +206,33 @@ class AttachedVideoRead(_ReadModel):
 
     shot_id: str
     file_id: str
+
+
+class CharacterViewsRequest(BaseModel):
+    """派生角色多视图：以当前正面形象为参考生成其它视角。"""
+
+    views: list[Literal["left", "right", "back", "three_quarter"]] = Field(default_factory=lambda: ["left", "back"])
+
+
+class TaskIdsRead(_ReadModel):
+    task_ids: list[str] = Field(default_factory=list)
+
+
+class TaskIdRead(_ReadModel):
+    task_id: str
+
+
+class PreviewGridRequest(BaseModel):
+    """预演四宫格：一张 2×2 图看四个节拍的构图与连续性，比生成视频便宜得多。"""
+
+    ratio: str | None = Field(None, description="图片比例；默认 1:1")
+
+
+class ShotAudioRead(_ReadModel):
+    """镜头的配音 / 配乐参考。"""
+
+    shot_id: str
+    file_id: str | None = None
 
 
 class ProjectOverviewRead(_ReadModel):

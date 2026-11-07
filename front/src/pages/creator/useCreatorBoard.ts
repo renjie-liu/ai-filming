@@ -16,8 +16,8 @@ const FORCE_POLL_MS = 12000
 export function boardHasActiveTask(board: CreatorBoardRead | null): boolean {
   if (!board) return false
   const tasks: Array<CreatorTaskRead | null | undefined> = [board.divide_task, board.extract_task]
-  for (const shot of board.shots) tasks.push(shot.keyframe_prompt_task, shot.keyframe_image_task, shot.video_task)
-  for (const ent of board.entities) tasks.push(ent.image_task)
+  for (const shot of board.shots) tasks.push(shot.keyframe_prompt_task, shot.keyframe_image_task, shot.preview_grid_task, shot.video_task)
+  for (const ent of board.entities) tasks.push(ent.image_task, ...ent.views.map((v) => v.task))
   return tasks.some((t) => t && isActiveStatus(t.status))
 }
 

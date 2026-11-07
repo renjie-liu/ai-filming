@@ -2,6 +2,8 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { CreatorEntityViewRead } from './CreatorEntityViewRead';
+import type { CreatorImageCandidateRead } from './CreatorImageCandidateRead';
 import type { CreatorTaskRead } from './CreatorTaskRead';
 /**
  * 创作页角色 / 场景 / 道具 / 服装卡。
@@ -35,5 +37,13 @@ export type CreatorEntityRead = {
      * 本章节内出现的镜头 ID
      */
     shot_ids: Array<string>;
+    /**
+     * 形象 / 参考图候选与历史（当前在前，最多 8 张）
+     */
+    image_candidates: Array<CreatorImageCandidateRead>;
+    /**
+     * 角色的其它视角形象（侧面 / 背面）
+     */
+    views: Array<CreatorEntityViewRead>;
 };
 

@@ -28,21 +28,24 @@ class VideoDerivedPreview(GenerationDerivedPreview):
 
 
 REFERENCE_BLOCK_HEADER = "参考素材（[Image n] 与上传顺序一一对应；人物脸型、发型、服装与场景布局必须与参考一致）："
+AUDIO_REFERENCE_LINE = "[Audio 1] 配音 / 配乐参考：按它的节奏、情绪与声音特征生成，台词口型与之对齐"
 
 
-def build_reference_block(labels: list[str]) -> str:
-    """全能参考模式的提示词开头：逐行列出 [Image n] 对应的角色 / 场景 / 关键帧说明。"""
-    if not labels:
+def build_reference_block(labels: list[str], *, audio: bool = False) -> str:
+    """全能参考模式的提示词开头：逐行列出 [Image n] 对应的角色 / 场景 / 关键帧说明，可附 [Audio 1] 行。"""
+    if not labels and not audio:
         return ""
     lines = [REFERENCE_BLOCK_HEADER] + [f"[Image {index + 1}] {label}" for index, label in enumerate(labels)]
+    if audio:
+        lines.append(AUDIO_REFERENCE_LINE)
     return "\n".join(lines)
 
 
-def prepend_reference_block(prompt: str, labels: list[str]) -> str:
-    """把参考素材块放到提示词最前面；用户改过的提示词里已有 [Image 1] 则不重复加。"""
+def prepend_reference_block(prompt: str, labels: list[str], *, audio: bool = False) -> str:
+    """把参考素材块放到提示词最前面；用户改过的提示词里已有 [Image 1] / [Audio 1] 则不重复加。"""
     text = (prompt or "").strip()
-    block = build_reference_block(labels)
-    if not block or "[Image 1]" in text:
+    block = build_reference_block(labels, audio=audio)
+    if not block or "[Image 1]" in text or "[Audio 1]" in text:
         return text
     return f"{block}\n\n{text}".strip() if text else block
 
@@ -59,7 +62,7 @@ async def derive_video_preview(
             rendered_prompt=base.prompt,
             pack=pack,
         )
-        rendered_prompt = prepend_reference_block(rendered_prompt, context.reference_labels)
+        rendered_prompt = prepend_reference_block(rendered_prompt, context.reference_labels, audio=bool(context.audio_file_id))
         return VideoDerivedPreview(
             shot_id=base.shot_id,
             reference_mode=context.reference_mode,
@@ -90,7 +93,7 @@ async def derive_video_preview(
     return VideoDerivedPreview(
         shot_id=base.shot_id,
         reference_mode=context.reference_mode,
-        rendered_prompt=prepend_reference_block(rendered_prompt, context.reference_labels),
+        rendered_prompt=prepend_reference_block(rendered_prompt, context.reference_labels, audio=bool(context.audio_file_id)),
         images=context.images,
         pack=pack,
         template_id=template.id if template else None,
