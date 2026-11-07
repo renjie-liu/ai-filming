@@ -395,3 +395,66 @@ async def _blob_list(*, prefix: str = "") -> list[StoredFileInfo]:
 async def _blob_delete(*, key: str) -> None:
     vercel_blob = _blob_module()
     await vercel_blob.delete_blob(_normalize_key(key))
+
+
+# ---------------------------------------------------------------------------
+# Vercel Blob 浏览器直传：客户端令牌
+# ---------------------------------------------------------------------------
+
+
+def blob_read_write_token() -> str | None:
+    """当前配置的 Blob 读写令牌（settings 或环境变量）；未配置返回 None。"""
+    _ensure_blob_token_env()
+    return (settings.blob_read_write_token or os.environ.get("BLOB_READ_WRITE_TOKEN") or "").strip() or None
+
+
+def blob_store_id_from_token(token: str) -> str | None:
+    """读写令牌格式 `vercel_blob_rw_<storeId>_<secret>`，取第 4 段为 store ID。"""
+    parts = token.split("_")
+    if len(parts) >= 5 and parts[0] == "vercel" and parts[1] == "blob":
+        return parts[3] or None
+    return None
+
+
+def normalize_storage_key(key: str) -> str:
+    """对外暴露的 key 归一化（拼上 base_path），直传时浏览器要用归一化后的 pathname。"""
+    return _normalize_key(key)
+
+
+def generate_blob_client_token(
+    *,
+    pathname: str,
+    allowed_content_types: list[str] | None = None,
+    maximum_size_in_bytes: int | None = None,
+    valid_until_ms: int | None = None,
+    valid_for_seconds: int = 3600,
+    add_random_suffix: bool = False,
+    allow_overwrite: bool = False,
+) -> str:
+    """签发 Vercel Blob 客户端上传令牌，与 `@vercel/blob` 的 `generateClientTokenFromReadWriteToken` 逐字节一致。
+
+    算法：payload = base64(JSON)；signature = HMAC-SHA256(key=读写令牌, msg=payload) 的 hex；
+    token = `vercel_blob_client_<storeId>_` + base64(signature + "." + payload)。
+    浏览器用它直接 PUT 到 blob.vercel-storage.com，文件不经过函数（避开 4.5 MB 请求体上限）。
+    """
+    import base64
+    import hashlib
+    import hmac
+    import json
+    import time
+
+    token = blob_read_write_token()
+    if not token:
+        raise StorageUnavailableError("Blob read-write token is not configured")
+    store_id = blob_store_id_from_token(token)
+    if not store_id:
+        raise StorageUnavailableError("Blob read-write token has an invalid format")
+    payload: dict[str, Any] = {"pathname": pathname, "addRandomSuffix": add_random_suffix, "allowOverwrite": allow_overwrite}
+    if allowed_content_types:
+        payload["allowedContentTypes"] = list(allowed_content_types)
+    if maximum_size_in_bytes:
+        payload["maximumSizeInBytes"] = int(maximum_size_in_bytes)
+    payload["validUntil"] = int(valid_until_ms) if valid_until_ms else int(time.time() * 1000) + valid_for_seconds * 1000
+    payload_b64 = base64.b64encode(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).decode("ascii")
+    signature = hmac.new(token.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"vercel_blob_client_{store_id}_" + base64.b64encode(f"{signature}.{payload_b64}".encode("utf-8")).decode("ascii")

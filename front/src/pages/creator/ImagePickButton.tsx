@@ -15,7 +15,9 @@ const ImagePickButton: React.FC<{
   children?: React.ReactNode
   size?: 'small' | 'middle'
   disabled?: boolean
-}> = ({ onPick, children = '上传图片', size = 'small', disabled }) => {
+  /** 可选文件类型，默认图片；上传视频时传 video/mp4 等 */
+  accept?: string
+}> = ({ onPick, children = '上传图片', size = 'small', disabled, accept = 'image/*' }) => {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [busy, setBusy] = useState(false)
   const onChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -33,7 +35,7 @@ const ImagePickButton: React.FC<{
   }
   return (
     <>
-      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onChange(e)} />
+      <input ref={inputRef} type="file" accept={accept} className="hidden" onChange={(e) => void onChange(e)} />
       <Button size={size} icon={<UploadOutlined />} loading={busy} disabled={disabled} onClick={() => inputRef.current?.click()}>
         {children}
       </Button>

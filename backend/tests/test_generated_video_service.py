@@ -136,7 +136,7 @@ async def test_preview_prompt_and_images_uses_auto_frame_ids() -> None:
         )
         await db.commit()
 
-        prompt, images, pack = await preview_prompt_and_images(
+        prompt, images, pack, _labels = await preview_prompt_and_images(
             db,
             shot_id="s1",
             reference_mode="first_last",
@@ -164,7 +164,7 @@ async def test_preview_prompt_and_images_prefers_request_images_when_provided() 
     db, engine = await _build_session()
     async with db:
         await _seed_shot_graph(db)
-        prompt, images, pack = await preview_prompt_and_images(
+        prompt, images, pack, _labels = await preview_prompt_and_images(
             db,
             shot_id="s1",
             reference_mode="first_last",

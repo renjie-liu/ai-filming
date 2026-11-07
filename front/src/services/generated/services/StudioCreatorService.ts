@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ApiResponse_AttachedImageRead_ } from '../models/ApiResponse_AttachedImageRead_';
+import type { ApiResponse_AttachedVideoRead_ } from '../models/ApiResponse_AttachedVideoRead_';
 import type { ApiResponse_CreatorEntityCreatedRead_ } from '../models/ApiResponse_CreatorEntityCreatedRead_';
 import type { ApiResponse_EntityShotsWrite_ } from '../models/ApiResponse_EntityShotsWrite_';
 import type { ApiResponse_NoneType_ } from '../models/ApiResponse_NoneType_';
@@ -139,6 +140,31 @@ export class StudioCreatorService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/creator/shots/{shot_id}/keyframe-from-file',
+            path: {
+                'shot_id': shotId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 创作模式：把上传的视频设为镜头成片
+     * @returns ApiResponse_AttachedVideoRead_ Successful Response
+     * @throws ApiError
+     */
+    public static attachShotVideoApiApiV1StudioCreatorShotsShotIdVideoFromFilePost({
+        shotId,
+        requestBody,
+    }: {
+        shotId: string,
+        requestBody: FileAttachRequest,
+    }): CancelablePromise<ApiResponse_AttachedVideoRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/creator/shots/{shot_id}/video-from-file',
             path: {
                 'shot_id': shotId,
             },

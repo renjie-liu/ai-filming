@@ -29,6 +29,14 @@ class VideoGenerationInput(BaseModel):
     first_frame_base64: Optional[str] = Field(None, description="首帧图：纯 base64 或 data:image/...;base64,...")
     last_frame_base64: Optional[str] = Field(None, description="尾帧图：纯 base64 或 data URL")
     key_frame_base64: Optional[str] = Field(None, description="关键帧图：纯 base64 或 data URL")
+    reference_images: list[str] = Field(
+        default_factory=list,
+        max_length=9,
+        description=(
+            "全能参考图（Seedance 2.x omni-reference）：公网 http(s) URL 或 data URL，按顺序对应提示词里的 [Image n]；"
+            "与首帧 / 首尾帧模式互斥"
+        ),
+    )
 
     model: Optional[str] = Field(None, description="视频模型名称（可选，供应商透传）")
     ratio: VideoRatio = Field(..., description="视频宽高比，业务层唯一主参数")
@@ -51,8 +59,11 @@ class VideoGenerationInput(BaseModel):
                 _strip_optional_b64(self.key_frame_base64),
             ]
         )
+        has_ref = has_ref or any(_strip_optional_b64(item) for item in self.reference_images)
         if not has_prompt and not has_ref:
             raise ValueError("Require prompt or at least one reference frame (base64)")
+        if self.reference_images and (_strip_optional_b64(self.first_frame_base64) or _strip_optional_b64(self.last_frame_base64)):
+            raise ValueError("reference_images cannot be combined with first/last frame images")
         return self
 
 

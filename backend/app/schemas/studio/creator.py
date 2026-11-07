@@ -45,7 +45,9 @@ class CreatorShotRead(_ReadModel):
     status: str = Field(..., description="shot.status：pending / ready（信息确认状态）")
     duration: int = Field(0, description="时长（秒）")
     camera_shot: str = Field("", description="景别 code（ECU / CU / MCU / MS / MLS / LS / ELS）")
+    angle: str = Field("", description="机位角度 code（EYE_LEVEL / HIGH_ANGLE / LOW_ANGLE / BIRD_EYE / DUTCH / OVER_SHOULDER）")
     movement: str = Field("", description="运镜 code（STATIC / PAN / DOLLY_IN …）")
+    action_beats: list[str] = Field(default_factory=list, description="动作节拍（按时长平均分配时间码写进视频提示词）")
     description: str = Field("", description="画面描述（首帧提示词；AI 生成后可编辑）")
     dialogue: list[CreatorDialogueLineRead] = Field(default_factory=list)
     character_ids: list[str] = Field(default_factory=list)
@@ -169,6 +171,13 @@ class AttachedImageRead(_ReadModel):
     """上传图挂载结果：图片行 ID 与文件 ID。"""
 
     image_id: int
+    file_id: str
+
+
+class AttachedVideoRead(_ReadModel):
+    """上传视频设为镜头成片的结果。"""
+
+    shot_id: str
     file_id: str
 
 

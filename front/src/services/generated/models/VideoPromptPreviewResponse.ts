@@ -13,6 +13,10 @@ export type VideoPromptPreviewResponse = {
      */
     images?: Array<string>;
     /**
+     * reference 模式下与 images 一一对应的 [Image n] 说明
+     */
+    reference_labels?: Array<string>;
+    /**
      * 视频提示词预览上下文包
      */
     pack?: (ShotVideoPromptPackRead | null);

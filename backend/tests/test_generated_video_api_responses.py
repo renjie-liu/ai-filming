@@ -77,7 +77,7 @@ def test_preview_video_generation_prompt_returns_success_envelope(client: TestCl
             "visual_style": "现实",
             "style": "真人都市",
             "negative_prompt": "",
-        }
+        }, []  # 第四项：reference 模式的 [Image n] 说明，帧模式为空
 
     monkeypatch.setattr(route, "preview_prompt_and_images", _fake_preview)
     app.dependency_overrides[get_db] = _override_db(db)

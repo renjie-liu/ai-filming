@@ -25,9 +25,17 @@ export type CreatorShotRead = {
      */
     camera_shot: string;
     /**
+     * 机位角度 code（EYE_LEVEL / HIGH_ANGLE / LOW_ANGLE / BIRD_EYE / DUTCH / OVER_SHOULDER）
+     */
+    angle: string;
+    /**
      * 运镜 code（STATIC / PAN / DOLLY_IN …）
      */
     movement: string;
+    /**
+     * 动作节拍（按时长平均分配时间码写进视频提示词）
+     */
+    action_beats: Array<string>;
     /**
      * 画面描述（首帧提示词；AI 生成后可编辑）
      */

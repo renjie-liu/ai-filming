@@ -78,7 +78,21 @@ def build_content(input_: VideoGenerationInput) -> list[dict[str, Any]]:
                 "image_url": {"url": to_image_data_url(kf)},
             }
         )
+    # 全能参考：角色 / 场景 / 道具形象图按顺序对应提示词里的 [Image n]；公网 URL 直接透传，避免 base64 撑爆请求体。
+    for ref in input_.reference_images:
+        value = _strip_optional_b64(ref)
+        if not value:
+            continue
+        items.append({"type": "image_url", "role": "reference_image", "image_url": {"url": to_image_url_value(value)}})
     return items
+
+
+def to_image_url_value(value: str) -> str:
+    """参考图取值：http(s) 公网地址原样传给方舟，其它视为 base64 / data URL。"""
+    v = value.strip()
+    if v.startswith("http://") or v.startswith("https://"):
+        return v
+    return to_image_data_url(v)
 
 
 def build_create_task_body(input_: VideoGenerationInput) -> dict[str, Any]:

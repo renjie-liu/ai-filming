@@ -19,7 +19,7 @@ import {
   type DialogueDraft,
 } from '../actions'
 import ImagePickButton from '../ImagePickButton'
-import { CAMERA_MOVEMENT_OPTIONS, CAMERA_SHOT_OPTIONS, ENTITY_TYPE_LABEL, cameraMovementLabel, cameraShotLabel } from '../labels'
+import { CAMERA_ANGLE_OPTIONS, CAMERA_MOVEMENT_OPTIONS, CAMERA_SHOT_OPTIONS, ENTITY_TYPE_LABEL, cameraAngleLabel, cameraMovementLabel, cameraShotLabel } from '../labels'
 import { ArtBox, DurationBadge, IndexBadge, TaskTag, taskErrorText } from '../ui'
 import { isActiveStatus } from '../taskPolling'
 
@@ -59,7 +59,7 @@ const ShotCard: React.FC<{ shot: CreatorShotRead; board: CreatorBoardRead; onEdi
   const active = keyframeActive(shot)
   const error = shot.keyframe_url ? null : taskErrorText(shot.keyframe_image_task) ?? taskErrorText(shot.keyframe_prompt_task)
   const refs = linkedEntities(shot, board)
-  const camera = [cameraShotLabel(shot.camera_shot), cameraMovementLabel(shot.movement)].filter(Boolean).join(' · ')
+  const camera = [cameraShotLabel(shot.camera_shot), cameraAngleLabel(shot.angle), cameraMovementLabel(shot.movement)].filter(Boolean).join(' · ')
   const run = async () => {
     setBusy(true)
     try {
@@ -140,7 +140,9 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
   const [description, setDescription] = useState('')
   const [duration, setDuration] = useState(4)
   const [cameraShot, setCameraShot] = useState<string>('')
+  const [angle, setAngle] = useState<string>('')
   const [movement, setMovement] = useState<string>('')
+  const [beats, setBeats] = useState('')
   const [linkIds, setLinkIds] = useState<string[]>([])
   const [dialogue, setDialogue] = useState<DialogueDraft[]>([])
   const [saving, setSaving] = useState(false)
@@ -157,7 +159,9 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
     setDescription(editing.description)
     setDuration(editing.duration || 4)
     setCameraShot(editing.camera_shot)
+    setAngle(editing.angle)
     setMovement(editing.movement)
+    setBeats(editing.action_beats.join('\n'))
     setLinkIds([...editing.character_ids, ...editing.scene_ids, ...editing.prop_ids])
     setDialogue(editing.dialogue.map((d) => ({ id: d.id, speakerCharacterId: d.speaker_character_id ?? null, speakerName: d.speaker, text: d.text })))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -192,7 +196,7 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
 
   /** 把抽屉里的改动写回：标题 / 描述 / 时长 / 景别 / 运镜 → 关联 → 对白。返回带新字段的镜头，供随后生成关键帧使用。 */
   const persist = async (shot: CreatorShotRead): Promise<CreatorShotRead> => {
-    await saveShot({ shotId: shot.id, title: title.trim() || shot.title, description: description.trim(), duration, cameraShot, movement })
+    await saveShot({ shotId: shot.id, title: title.trim() || shot.title, description: description.trim(), duration, cameraShot, angle, movement, actionBeats: beats.split('\n') })
     const links = splitLinks(linkIds)
     if (linksDirty(shot)) await setShotLinks(shot.id, links)
     await saveDialogue(shot.id, dialogue, shot.dialogue)
@@ -325,15 +329,23 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
               <span className="text-xs text-gray-500">标题</span>
               <Input id="shot-title" value={title} onChange={(e) => setTitle(e.target.value)} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-gray-500">景别</span>
                 <Select id="shot-camera" value={cameraShot || undefined} onChange={(v) => setCameraShot(v)} options={CAMERA_SHOT_OPTIONS} placeholder="未指定" allowClear onClear={() => setCameraShot('')} />
               </div>
               <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-500">机位</span>
+                <Select id="shot-angle" value={angle || undefined} onChange={(v) => setAngle(v)} options={CAMERA_ANGLE_OPTIONS} placeholder="未指定" allowClear onClear={() => setAngle('')} />
+              </div>
+              <div className="flex flex-col gap-1">
                 <span className="text-xs text-gray-500">运镜</span>
                 <Select id="shot-movement" value={movement || undefined} onChange={(v) => setMovement(v)} options={CAMERA_MOVEMENT_OPTIONS} placeholder="未指定" allowClear onClear={() => setMovement('')} />
               </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-gray-500">动作节拍（每行一个；多条时按时长平均分配时间码写进视频提示词，如 [0-3s] / [3-6s]）</span>
+              <Input.TextArea id="shot-beats" value={beats} onChange={(e) => setBeats(e.target.value)} autoSize={{ minRows: 2, maxRows: 6 }} placeholder={'三位神端着咖啡走向白板\n雷霆总监放下马克杯，白板出现闪电\n留空时由 AI 从描述里提炼'} />
             </div>
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between">

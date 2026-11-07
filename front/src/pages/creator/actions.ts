@@ -1,5 +1,6 @@
 import {
   FilmService,
+  OpenAPI,
   ScriptProcessingService,
   StudioChaptersService,
   StudioCreatorService,
@@ -11,6 +12,7 @@ import {
   StudioShotsService,
 } from '../../services/generated'
 import type {
+  CameraAngle,
   CameraMovement,
   CameraShotType,
   ChapterRead,
@@ -220,7 +222,7 @@ export type UploadScope = {
   projectId: string
   chapterId?: string | null
   shotId?: string | null
-  usageKind: 'character_image' | 'asset_image' | 'shot_frame' | 'upload'
+  usageKind: 'character_image' | 'asset_image' | 'shot_frame' | 'generated_video' | 'upload'
 }
 
 /** 上传一张图片：先在浏览器缩到 2K 以内（避开函数请求体上限），再建文件记录；返回文件 ID。 */
@@ -377,21 +379,91 @@ export function isRealPersonRejection(error: string | null | undefined): boolean
   return /PrivacyInformation|real person/i.test(error ?? '')
 }
 
-/** 生成视频：有关键帧用首帧模式，否则纯文字；提示词由后端按镜头信息渲染。textOnly 可强制不带参考图。 */
-export async function generateVideo(args: { shot: CreatorShotRead; ratio: VideoRatio; textOnly?: boolean }): Promise<void> {
-  const { shot, ratio, textOnly } = args
-  const useFrame = !!shot.keyframe_file_id && !textOnly
-  const referenceMode: VideoGenerationTaskRequest['reference_mode'] = useFrame ? 'first' : 'text_only'
-  const images = useFrame ? [shot.keyframe_file_id as string] : []
+/** 一次视频生成的参考方案：模式 + 参考图 file_id（reference 模式还带每张图的 [Image n] 说明）。 */
+export type VideoPlan = { mode: VideoGenerationTaskRequest['reference_mode']; images: string[]; labels?: string[] }
+
+/** 让后端按镜头信息（含参考素材块、镜头语言、时间码节拍）渲染视频提示词；prompt 传入时只做补强不重写。 */
+export async function previewVideoPrompt(args: { shot: CreatorShotRead; ratio: VideoRatio; plan: VideoPlan; prompt?: string | null }): Promise<{ prompt: string; images: string[]; labels: string[] }> {
+  const { shot, ratio, plan, prompt } = args
   const preview = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
-    requestBody: { shot_id: shot.id, reference_mode: referenceMode, prompt: null, images, ratio },
+    requestBody: { shot_id: shot.id, reference_mode: plan.mode, prompt: prompt ?? null, images: plan.images, reference_labels: plan.labels ?? null, ratio },
   })
-  const prompt = preview.data?.prompt?.trim()
-  if (!prompt) throw new Error('没有生成出视频提示词')
+  const rendered = preview.data?.prompt?.trim()
+  if (!rendered) throw new Error('没有生成出视频提示词')
+  return { prompt: rendered, images: preview.data?.images ?? plan.images, labels: preview.data?.reference_labels ?? [] }
+}
+
+/**
+ * 生成视频。不传 plan 时按「有关键帧用首帧，否则纯文字」；创作页通常由 videoPlan.ts 给出全能参考方案。
+ * prompt 传入时按用户改过的提示词提交；textOnly 可强制不带任何参考图（真人参考被拒后的重试）。
+ */
+export async function generateVideo(args: { shot: CreatorShotRead; ratio: VideoRatio; plan?: VideoPlan; prompt?: string | null; textOnly?: boolean }): Promise<void> {
+  const { shot, ratio, textOnly } = args
+  let plan: VideoPlan = args.plan ?? (shot.keyframe_file_id ? { mode: 'first', images: [shot.keyframe_file_id] } : { mode: 'text_only', images: [] })
+  if (textOnly) plan = { mode: 'text_only', images: [] }
+  const preview = await previewVideoPrompt({ shot, ratio, plan, prompt: args.prompt })
   const res = await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
-    requestBody: { shot_id: shot.id, reference_mode: referenceMode, prompt, images: preview.data?.images ?? images, ratio },
+    requestBody: {
+      shot_id: shot.id,
+      reference_mode: plan.mode,
+      prompt: preview.prompt,
+      images: preview.images,
+      reference_labels: plan.mode === 'reference' ? preview.labels : null,
+      ratio,
+    },
   })
   if (!res.data?.task_id) throw new Error(res.message || '视频任务创建失败')
+}
+
+/**
+ * 上传一段视频：存储是 Vercel Blob 时浏览器直传（绕开函数 4.5 MB 请求体上限），否则走多部分上传并限制大小。
+ * 返回文件 ID。
+ */
+export async function uploadVideo(file: File, scope: UploadScope): Promise<string> {
+  const caps = await StudioFilesService.directUploadCapabilitiesApiApiV1StudioFilesDirectUploadCapabilitiesGet()
+  if (caps.data?.direct === 'vercel_blob') {
+    const prepared = await StudioFilesService.directUploadPrepareApiApiV1StudioFilesDirectUploadPreparePost({ requestBody: { filename: file.name } })
+    const storageKey = prepared.data?.storage_key
+    const pathname = prepared.data?.pathname
+    if (!storageKey || !pathname) throw new Error(prepared.message || '上传准备失败')
+    const { upload } = await import('@vercel/blob/client')
+    const result = await upload(pathname, file, {
+      access: 'public',
+      handleUploadUrl: `${OpenAPI.BASE}/api/v1/studio/files/client-upload`,
+      contentType: file.type || 'video/mp4',
+      multipart: file.size > 8 * 1024 * 1024,
+    })
+    const registered = await StudioFilesService.directUploadRegisterApiApiV1StudioFilesDirectUploadRegisterPost({
+      requestBody: {
+        storage_key: storageKey,
+        url: result.url,
+        name: file.name,
+        content_type: file.type || null,
+        size: file.size,
+        project_id: scope.projectId,
+        chapter_id: scope.chapterId ?? null,
+        shot_id: scope.shotId ?? null,
+        usage_kind: scope.usageKind,
+      },
+    })
+    const id = registered.data?.id
+    if (!id) throw new Error(registered.message || '上传登记失败')
+    return id
+  }
+  const max = caps.data?.max_server_upload_bytes ?? 4 * 1024 * 1024
+  if (file.size > max) throw new Error(`视频超过 ${Math.round(max / 1024 / 1024)} MB，当前存储不支持浏览器直传，请压缩后再传`)
+  const res = await StudioFilesService.uploadFileApiApiV1StudioFilesUploadPost({
+    formData: { file: file as unknown as string, project_id: scope.projectId, chapter_id: scope.chapterId ?? null, shot_id: scope.shotId ?? null, usage_kind: scope.usageKind },
+  })
+  const id = res.data?.id
+  if (!id) throw new Error(res.message || '上传失败')
+  return id
+}
+
+/** 用自己的视频片段作为镜头成片（替换 AI 生成结果）。 */
+export async function uploadShotVideo(shot: CreatorShotRead, file: File, scope: { projectId: string; chapterId: string }): Promise<void> {
+  const fileId = await uploadVideo(file, { ...scope, shotId: shot.id, usageKind: 'generated_video' })
+  await StudioCreatorService.attachShotVideoApiApiV1StudioCreatorShotsShotIdVideoFromFilePost({ shotId: shot.id, requestBody: { file_id: fileId } })
 }
 
 /** 新增一个镜头（带默认时长 4 秒），并自动确认使其可生成。 */
@@ -404,13 +476,24 @@ export async function addShot(args: { chapterId: string; index: number; title: s
   await StudioChaptersService.autoConfirmChapterApiApiV1StudioChaptersChapterIdAutoConfirmPost({ chapterId })
 }
 
-/** 保存镜头卡片上可编辑的字段：标题、画面描述、时长，以及可选的景别 / 运镜。 */
-export async function saveShot(args: { shotId: string; title: string; description: string; duration: number; cameraShot?: string; movement?: string }): Promise<void> {
-  const { shotId, title, description, duration, cameraShot, movement } = args
+/** 保存镜头卡片上可编辑的字段：标题、画面描述、时长，以及可选的景别 / 机位 / 运镜与动作节拍。 */
+export async function saveShot(args: {
+  shotId: string
+  title: string
+  description: string
+  duration: number
+  cameraShot?: string
+  angle?: string
+  movement?: string
+  actionBeats?: string[]
+}): Promise<void> {
+  const { shotId, title, description, duration, cameraShot, angle, movement, actionBeats } = args
   await StudioShotsService.updateShotApiV1StudioShotsShotIdPatch({ shotId, requestBody: { title } })
   const body: ShotDetailUpdate = { first_frame_prompt: description, duration }
   if (cameraShot) body.camera_shot = cameraShot as CameraShotType
+  if (angle) body.angle = angle as CameraAngle
   if (movement) body.movement = movement as CameraMovement
+  if (actionBeats) body.action_beats = actionBeats.map((b) => b.trim()).filter(Boolean)
   await StudioShotDetailsService.updateShotDetailApiV1StudioShotDetailsShotIdPatch({ shotId, requestBody: body })
 }
 

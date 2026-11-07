@@ -3,11 +3,16 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ApiResponse_dict_ } from '../models/ApiResponse_dict_';
+import type { ApiResponse_DirectUploadCapabilitiesRead_ } from '../models/ApiResponse_DirectUploadCapabilitiesRead_';
+import type { ApiResponse_DirectUploadPrepareRead_ } from '../models/ApiResponse_DirectUploadPrepareRead_';
 import type { ApiResponse_FileDetailRead_ } from '../models/ApiResponse_FileDetailRead_';
 import type { ApiResponse_FileRead_ } from '../models/ApiResponse_FileRead_';
 import type { ApiResponse_NoneType_ } from '../models/ApiResponse_NoneType_';
 import type { ApiResponse_PaginatedData_FileRead__ } from '../models/ApiResponse_PaginatedData_FileRead__';
 import type { Body_upload_file_api_api_v1_studio_files_upload_post } from '../models/Body_upload_file_api_api_v1_studio_files_upload_post';
+import type { ClientUploadEvent } from '../models/ClientUploadEvent';
+import type { DirectUploadPrepareRequest } from '../models/DirectUploadPrepareRequest';
+import type { DirectUploadRegisterRequest } from '../models/DirectUploadRegisterRequest';
 import type { FileUpdate } from '../models/FileUpdate';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -196,6 +201,77 @@ export class StudioFilesService {
             path: {
                 'file_id': fileId,
             },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 上传能力探测
+     * @returns ApiResponse_DirectUploadCapabilitiesRead_ Successful Response
+     * @throws ApiError
+     */
+    public static directUploadCapabilitiesApiApiV1StudioFilesDirectUploadCapabilitiesGet(): CancelablePromise<ApiResponse_DirectUploadCapabilitiesRead_> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/studio/files/direct-upload/capabilities',
+        });
+    }
+    /**
+     * 直传准备：生成存储 key 与 pathname
+     * @returns ApiResponse_DirectUploadPrepareRead_ Successful Response
+     * @throws ApiError
+     */
+    public static directUploadPrepareApiApiV1StudioFilesDirectUploadPreparePost({
+        requestBody,
+    }: {
+        requestBody: DirectUploadPrepareRequest,
+    }): CancelablePromise<ApiResponse_DirectUploadPrepareRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/files/direct-upload/prepare',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 直传：签发 Vercel Blob 客户端令牌（@vercel/blob handleUpload 协议）
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static clientUploadApiApiV1StudioFilesClientUploadPost({
+        requestBody,
+    }: {
+        requestBody: ClientUploadEvent,
+    }): CancelablePromise<Record<string, any>> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/files/client-upload',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 直传完成：登记为文件记录
+     * @returns ApiResponse_FileRead_ Successful Response
+     * @throws ApiError
+     */
+    public static directUploadRegisterApiApiV1StudioFilesDirectUploadRegisterPost({
+        requestBody,
+    }: {
+        requestBody: DirectUploadRegisterRequest,
+    }): CancelablePromise<ApiResponse_FileRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/files/direct-upload/register',
+            body: requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: `Validation Error`,
             },

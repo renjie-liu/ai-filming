@@ -55,6 +55,10 @@ const RULES: Array<[RegExp, string | ((m: RegExpMatchArray) => string)]> = [
   [/BlobStoreSuspended|limits-exceeded|usage ?quota|store has been suspended/i, '素材存储（Vercel Blob）已超出免费额度被暂停，图片和视频暂时无法保存。请在 Vercel 控制台升级套餐或等待额度重置，也可以改用 S3 兼容存储'],
   [/BlobServiceRateLimited/i, '存储服务限流，请稍后重试'],
   [/BlobCredentialsError|BlobAccessError|BlobStoreNotFound|Blob storage unavailable/i, '素材存储暂不可用，请检查 Vercel Blob 配置（BLOB_READ_WRITE_TOKEN）'],
+  [/No reference images available/i, '这个镜头还没有可用的参考图：先给角色生成形象或生成关键帧，或者改用「仅文字」'],
+  [/reference_mode=reference requires 1-9 images/i, '形象参考最多 9 张、至少 1 张，请调整勾选'],
+  [/url does not match the prepared upload path|invalid upload pathname|invalid storage key/i, '上传校验失败，请重新上传'],
+  [/direct upload is unavailable/i, '当前存储不支持浏览器直传，视频需在 4 MB 以内'],
   // ---- 上传 ----
   [/Request Entity Too Large|Payload Too Large|FUNCTION_PAYLOAD_TOO_LARGE|\b413\b/i, '图片太大，请换一张 4 MB 以内的图片'],
   [/Unsupported file type|unsupported (image|media) type/i, '不支持的图片格式，请使用 JPG / PNG / WebP'],

@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^5.2.6",
+    "@vercel/blob": "^2.8.2",
     "antd": "^5.10.0",
     "axios": "^1.13.6",
     "i18next": "^23.11.4",

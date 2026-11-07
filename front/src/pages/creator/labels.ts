@@ -23,6 +23,15 @@ export const CAMERA_SHOT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'ELS', label: '大远景' },
 ]
 
+export const CAMERA_ANGLE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'EYE_LEVEL', label: '平视' },
+  { value: 'HIGH_ANGLE', label: '俯拍' },
+  { value: 'LOW_ANGLE', label: '仰拍' },
+  { value: 'BIRD_EYE', label: '鸟瞰' },
+  { value: 'DUTCH', label: '荷兰角' },
+  { value: 'OVER_SHOULDER', label: '过肩' },
+]
+
 export const CAMERA_MOVEMENT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'STATIC', label: '固定' },
   { value: 'PAN', label: '横摇' },
@@ -43,4 +52,8 @@ export function cameraShotLabel(code: string): string {
 
 export function cameraMovementLabel(code: string): string {
   return CAMERA_MOVEMENT_OPTIONS.find((o) => o.value === code)?.label ?? ''
+}
+
+export function cameraAngleLabel(code: string): string {
+  return CAMERA_ANGLE_OPTIONS.find((o) => o.value === code)?.label ?? ''
 }

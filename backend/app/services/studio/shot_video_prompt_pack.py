@@ -10,8 +10,8 @@
 
 from __future__ import annotations
 
-from typing import Any
 import re
+from typing import Any
 
 from fastapi import HTTPException, status
 from langchain_core.prompts import PromptTemplate as LcPromptTemplate
@@ -30,11 +30,69 @@ from app.services.common import entity_not_found
 from app.services.studio.action_beats import infer_action_beat_sequence
 from app.services.studio.shot_assets_overview import get_shot_assets_overview
 
-
 DEFAULT_VIDEO_NEGATIVE_PROMPT = (
     "不要新增无关人物；不要改变角色身份、服装颜色和场景地点；"
     "不要出现文字水印、肢体畸形、镜头跳变和画面闪烁。"
 )
+
+# 景别 / 机位 / 运镜 code → 可执行的镜头语言（含建议焦段）；参考 Higgsfield Cinema Studio 的「预设代替形容词」做法
+CAMERA_SHOT_PHRASES: dict[str, str] = {
+    "ECU": "大特写，85mm 长焦，极浅景深",
+    "CU": "特写，85mm 长焦，浅景深",
+    "MCU": "中近景，50mm 标准镜头",
+    "MS": "中景，50mm 标准镜头",
+    "MLS": "中远景，35mm 广角",
+    "LS": "远景，35mm 广角",
+    "ELS": "大远景，24mm 超广角",
+}
+CAMERA_ANGLE_PHRASES: dict[str, str] = {
+    "EYE_LEVEL": "平视机位",
+    "HIGH_ANGLE": "俯拍",
+    "LOW_ANGLE": "仰拍",
+    "BIRD_EYE": "鸟瞰俯视",
+    "DUTCH": "荷兰角倾斜构图",
+    "OVER_SHOULDER": "过肩机位",
+}
+CAMERA_MOVEMENT_PHRASES: dict[str, str] = {
+    "STATIC": "固定机位，画面稳定",
+    "PAN": "缓慢横摇",
+    "TILT": "缓慢竖摇",
+    "DOLLY_IN": "镜头缓慢推近，重心逐步向主体收束",
+    "DOLLY_OUT": "镜头缓慢拉远，逐步露出环境",
+    "TRACK": "跟随主体平移跟拍",
+    "CRANE": "升降镜头，垂直移动",
+    "HANDHELD": "手持轻微晃动，纪实感",
+    "STEADICAM": "稳定器跟拍，运动平滑",
+    "ZOOM_IN": "变焦推进",
+    "ZOOM_OUT": "变焦拉远",
+}
+
+
+def camera_phrase(camera: ShotPromptCameraInfo) -> str:
+    """把景别 / 机位 / 运镜 code 翻成一句可执行的镜头语言；未知 code 原样保留。"""
+    parts = [
+        CAMERA_SHOT_PHRASES.get(camera.camera_shot or "", camera.camera_shot or ""),
+        CAMERA_ANGLE_PHRASES.get(camera.angle or "", camera.angle or ""),
+        CAMERA_MOVEMENT_PHRASES.get(camera.movement or "", camera.movement or ""),
+    ]
+    return "；".join(part for part in parts if part)
+
+
+def timecoded_beats(beats: list[str], duration: int | None) -> list[str]:
+    """多个动作节拍按时长平均分配时间码（Seedance 2.x 的分段写法：`[0-3s] …` `[3-6s] …`）。
+
+    只有一个节拍或没有时长时原样返回；时长太短放不下的段落不加时间码。
+    """
+    items = [str(beat).strip() for beat in beats if str(beat or "").strip()]
+    if len(items) <= 1 or not duration or duration <= 0:
+        return items
+    count = len(items)
+    edges = [round(duration * index / count) for index in range(count + 1)]
+    out: list[str] = []
+    for index, beat in enumerate(items):
+        start, end = edges[index], edges[index + 1]
+        out.append(f"[{start}-{end}s] {beat}" if end > start else beat)
+    return out
 
 
 def _enum_value(value: Any) -> str:
@@ -68,6 +126,8 @@ def _pack_variables(pack: ShotVideoPromptPackRead) -> dict[str, Any]:
         "script_excerpt": pack.script_excerpt,
         "action_beats": "\n".join(pack.action_beats),
         "action_beats_text": "；".join(pack.action_beats),
+        "action_beats_timed": "；".join(timecoded_beats(pack.action_beats, pack.camera.duration)),
+        "camera_phrase": camera_phrase(pack.camera),
         "previous_shot_summary": pack.previous_shot_summary,
         "next_shot_goal": pack.next_shot_goal,
         "continuity_guidance": pack.continuity_guidance,
@@ -103,8 +163,11 @@ def _render_template(content: str, variables: dict[str, Any]) -> str:
 def _build_guidance_suffix(pack: ShotVideoPromptPackRead) -> str:
     """生成一段稳定的镜头执行约束，供模板渲染结果补强使用。"""
     lines: list[str] = []
+    phrase = camera_phrase(pack.camera)
+    if phrase:
+        lines.append(f"镜头执行：{phrase}")
     if pack.action_beats:
-        lines.append(f"动作节拍：{'；'.join(pack.action_beats)}")
+        lines.append(f"动作节拍：{'；'.join(timecoded_beats(pack.action_beats, pack.camera.duration))}")
     if pack.previous_shot_summary:
         lines.append(f"上一镜头承接：{pack.previous_shot_summary}")
     if pack.next_shot_goal:
@@ -137,6 +200,7 @@ def enrich_rendered_video_prompt(
     if any(
         marker in normalized
         for marker in (
+            "镜头执行：",
             "动作节拍：",
             "上一镜头承接：",
             "连续性要求：",
@@ -336,11 +400,11 @@ def _build_screen_direction_guidance(
 
 def _fallback_video_prompt(pack: ShotVideoPromptPackRead) -> str:
     style_text = "，".join(x for x in [pack.visual_style, pack.style] if x)
-    camera_text = " / ".join(x for x in [pack.camera.camera_shot, pack.camera.angle, pack.camera.movement] if x)
+    camera_text = camera_phrase(pack.camera)
     parts = [
         f"镜头标题：{pack.title}",
         f"剧本摘录：{pack.script_excerpt}",
-        f"动作节拍：{'；'.join(pack.action_beats)}" if pack.action_beats else "",
+        f"动作节拍：{'；'.join(timecoded_beats(pack.action_beats, pack.camera.duration))}" if pack.action_beats else "",
         f"画面风格：{style_text}",
         f"镜头语言：{camera_text}",
         f"时长：{pack.camera.duration} 秒" if pack.camera.duration else "",

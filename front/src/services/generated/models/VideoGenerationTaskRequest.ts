@@ -11,17 +11,21 @@ export type VideoGenerationTaskRequest = {
      */
     shot_id: string;
     /**
-     * 参考模式：first | last | key | first_last | first_last_key | text_only
+     * 参考模式：first | last | key | first_last | first_last_key | reference（全能参考：角色 / 场景形象图 + 可选关键帧，1–9 张，提示词按 [Image n] 点名）| text_only
      */
-    reference_mode: 'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'text_only';
+    reference_mode: 'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'reference' | 'text_only';
     /**
      * 视频提示词（text_only 必填）
      */
     prompt?: (string | null);
     /**
-     * 参考图 file_id 列表，数量需与 reference_mode 严格匹配
+     * 参考图 file_id 列表；帧模式数量需与 reference_mode 严格匹配，reference 模式 1–9 张（为空时按镜头关联实体自动收集）
      */
     images?: Array<string>;
+    /**
+     * reference 模式下与 images 一一对应的素材说明（如「角色「雷霆总监」：40岁…」），写进提示词的 [Image n] 行；为空时自动生成
+     */
+    reference_labels?: (Array<string> | null);
     /**
      * 视频画幅比例，如 16:9 / 9:16
      */

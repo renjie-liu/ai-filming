@@ -8,20 +8,24 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
+from app.core.contracts.provider import ProviderConfig
+from app.core.contracts.video_generation import (
+    VideoGenerationInput,
+    VideoGenerationResult,
+)
 from app.core.db import async_session_maker
 from app.core.task_manager import SqlAlchemyTaskStore
 from app.core.task_manager.types import TaskStatus
-from app.core.contracts.provider import ProviderConfig
-from app.core.contracts.video_generation import VideoGenerationInput, VideoGenerationResult
 from app.core.tasks import VideoGenerationTask
 from app.models.llm import Model, ModelCategoryKey, ModelSettings
-from app.models.task_links import GenerationTaskLink
 from app.models.studio import FileItem, Shot, ShotDetail, ShotFrameType
+from app.models.task_links import GenerationTaskLink
 from app.models.types import FileUsageKind
 from app.services.common import entity_not_found
 from app.services.llm.provider_resolver import resolve_provider_config_by_model
 from app.services.studio.file_usages import sync_usage_from_shot_context
 from app.services.studio.generation.video import (
+    REFERENCE_MODE,
     REQUIRED_FRAMES_BY_MODE,
     build_video_base_draft,
     build_video_context,
@@ -32,6 +36,7 @@ from app.services.studio.shot_status import recompute_shot_status
 from app.services.worker.async_task_support import cancel_if_requested_async
 from app.services.worker.task_logging import log_task_event, log_task_failure
 from app.utils.files import create_file_from_url_or_b64
+
 
 async def validate_shot_and_duration(db: AsyncSession, shot_id: str) -> ShotDetail:
     shot = await db.get(Shot, shot_id)
@@ -73,6 +78,15 @@ async def file_id_to_data_url(db: AsyncSession, *, file_id: str) -> str:
     return f"data:image/{image_format};base64,{encoded}"
 
 
+async def file_id_to_image_url(db: AsyncSession, *, file_id: str) -> str:
+    """参考图取值：对象存储公网地址优先（方舟直接拉取，不占请求体），没有公网地址时退回 data URL。"""
+    file_obj = await db.get(FileItem, file_id)
+    thumbnail = str(getattr(file_obj, "thumbnail", "") or "").strip() if file_obj is not None else ""
+    if thumbnail.startswith("http://") or thumbnail.startswith("https://"):
+        return thumbnail
+    return await file_id_to_data_url(db, file_id=file_id)
+
+
 async def preview_prompt_and_images(
     db: AsyncSession,
     *,
@@ -80,23 +94,24 @@ async def preview_prompt_and_images(
     reference_mode: str,
     prompt: str | None,
     images: list[str] | None = None,
-) -> tuple[str, list[str], dict | None]:
-    shot_detail = await validate_shot_and_duration(db, shot_id)
+    reference_labels: list[str] | None = None,
+) -> tuple[str, list[str], dict | None, list[str]]:
+    """渲染最终提示词，并返回参考图 file_id 列表、提示词上下文包与 reference 模式的 [Image n] 说明。"""
+    await validate_shot_and_duration(db, shot_id)
     base = build_video_base_draft(shot_id=shot_id, prompt=prompt)
     context = await build_video_context(
         db,
         shot_id=shot_id,
         reference_mode=reference_mode,
         images=images,
+        reference_labels=reference_labels,
     )
     submission = await build_video_submission_payload(db, base=base, context=context)
     if not submission.prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
     prompt_preview_payload = submission.extra.get("prompt_preview")
-    if isinstance(prompt_preview_payload, dict):
-        pack = prompt_preview_payload.get("pack")
-        return submission.prompt, submission.images, pack if isinstance(pack, dict) else None
-    return submission.prompt, submission.images, None
+    pack = prompt_preview_payload.get("pack") if isinstance(prompt_preview_payload, dict) else None
+    return submission.prompt, submission.images, pack if isinstance(pack, dict) else None, list(context.reference_labels)
 
 
 async def resolve_default_video_model(db: AsyncSession) -> Model:
@@ -151,7 +166,9 @@ async def build_run_args(
     prompt: str | None,
     images: list[str],
     ratio: str | None,
+    reference_labels: list[str] | None = None,
 ) -> dict:
+    """组装视频任务的运行参数：帧模式把帧图转 data URL；全能参考模式把参考图按公网 URL 透传。"""
     model = await resolve_default_video_model(db)
     provider_cfg = await load_provider_config_by_model(db, model)
     shot_detail = await validate_shot_and_duration(db, shot_id)
@@ -162,6 +179,7 @@ async def build_run_args(
         shot_id=shot_id,
         reference_mode=reference_mode,
         images=images,
+        reference_labels=reference_labels,
     )
     submission = await build_video_submission_payload(db, base=base, context=context)
     validate_images_count(reference_mode, submission.images)
@@ -170,9 +188,14 @@ async def build_run_args(
     if not final_prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
 
-    required_frames = tuple(ShotFrameType(item) for item in REQUIRED_FRAMES_BY_MODE[reference_mode])
-    frame_data_urls = [await file_id_to_data_url(db, file_id=file_id) for file_id in submission.images]
-    frame_map = {ft: frame_data_urls[i] for i, ft in enumerate(required_frames)}
+    frame_map: dict[ShotFrameType, str] = {}
+    reference_images: list[str] = []
+    if reference_mode == REFERENCE_MODE:
+        reference_images = [await file_id_to_image_url(db, file_id=file_id) for file_id in submission.images]
+    else:
+        required_frames = tuple(ShotFrameType(item) for item in REQUIRED_FRAMES_BY_MODE[reference_mode])
+        frame_data_urls = [await file_id_to_data_url(db, file_id=file_id) for file_id in submission.images]
+        frame_map = {ft: frame_data_urls[i] for i, ft in enumerate(required_frames)}
 
     run_args = {
         "shot_id": shot_id,
@@ -184,6 +207,7 @@ async def build_run_args(
             "first_frame_base64": frame_map.get(ShotFrameType.first),
             "last_frame_base64": frame_map.get(ShotFrameType.last),
             "key_frame_base64": frame_map.get(ShotFrameType.key),
+            "reference_images": reference_images,
             "model": model.name,
             "ratio": resolved_ratio,
             "seconds": shot_detail.duration,

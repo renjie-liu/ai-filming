@@ -47,6 +47,7 @@ from app.models.studio import (
 )
 from app.models.task import GenerationTask
 from app.models.task_links import GenerationTaskLink
+from app.models.types import FileUsageKind
 from app.schemas.studio.creator import (
     AutoConfirmResultRead,
     CreatorBoardRead,
@@ -62,6 +63,7 @@ from app.schemas.studio.creator import (
 from app.services.common import entity_not_found
 from app.services.studio.entity_crud import create_entity
 from app.services.studio.entity_thumbnails import download_url
+from app.services.studio.file_usages import sync_usage_from_shot_context
 from app.services.studio.shot_extracted_candidates import (
     mark_linked,
     mark_linked_by_name,
@@ -449,7 +451,9 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
                 status=_enum_value(shot.status),
                 duration=duration,
                 camera_shot=_enum_value(detail.camera_shot) if detail is not None and detail.camera_shot else "",
+                angle=_enum_value(detail.angle) if detail is not None and detail.angle else "",
                 movement=_enum_value(detail.movement) if detail is not None and detail.movement else "",
+                action_beats=[str(item) for item in (detail.action_beats or []) if str(item).strip()] if detail is not None else [],
                 description=(detail.first_frame_prompt if detail is not None else "") or "",
                 dialogue=dialogue,
                 character_ids=chars_by_shot.get(shot.id, []),
@@ -755,6 +759,24 @@ async def attach_shot_keyframe(db: AsyncSession, *, shot_id: str, file_id: str) 
     await db.flush()
     await db.refresh(frame)
     return int(frame.id)
+
+
+async def attach_shot_video(db: AsyncSession, *, shot_id: str, file_id: str) -> str:
+    """把上传的视频设为镜头成片（替换 AI 生成结果；成片页照常连播）。返回文件 ID。"""
+    shot = await db.get(Shot, shot_id)
+    if shot is None:
+        raise ValueError(entity_not_found("Shot"))
+    file = await db.get(FileItem, file_id)
+    if file is None:
+        raise ValueError(entity_not_found("FileItem"))
+    if _enum_value(file.type) != "video":
+        raise CreatorInputError("file is not a video")
+    shot.generated_video_file_id = file_id
+    await sync_usage_from_shot_context(
+        db, file_id=file_id, shot_id=shot_id, usage_kind=FileUsageKind.generated_video, source_ref=f"shot:{shot_id}:uploaded_video"
+    )
+    await db.flush()
+    return file_id
 
 
 # ---------------------------------------------------------------------------

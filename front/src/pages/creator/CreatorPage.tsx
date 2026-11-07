@@ -219,7 +219,7 @@ const CreatorPage: React.FC = () => {
       case 'storyboard':
         return <StoryboardStep board={board} onNext={() => setStep('video')} onTaskStarted={pollSoon} onChanged={refresh} batchRef={storyboardBatch} />
       case 'video':
-        return <VideoStep board={board} onBack={() => setStep('storyboard')} onFinal={() => setStep('final')} onTaskStarted={pollSoon} onEditShot={() => setStep('storyboard')} startRef={videoStart} />
+        return <VideoStep board={board} onBack={() => setStep('storyboard')} onFinal={() => setStep('final')} onTaskStarted={pollSoon} onChanged={refresh} onEditShot={() => setStep('storyboard')} startRef={videoStart} />
       case 'final':
         return <FinalStep board={board} onBackToVideo={() => setStep('video')} onNewEpisode={() => void newEpisode()} />
       default:

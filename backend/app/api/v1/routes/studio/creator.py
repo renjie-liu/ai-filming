@@ -18,6 +18,7 @@ from app.schemas.common import (
 )
 from app.schemas.studio.creator import (
     AttachedImageRead,
+    AttachedVideoRead,
     CreatorEntityCreate,
     CreatorEntityCreatedRead,
     EntityShotsWrite,
@@ -28,6 +29,7 @@ from app.services.studio.creator_flow import (
     CreatorInputError,
     attach_entity_image,
     attach_shot_keyframe,
+    attach_shot_video,
     create_chapter_entity,
     set_entity_shots,
     set_shot_entity_links,
@@ -144,3 +146,21 @@ async def attach_shot_keyframe_api(
         raise _http_error(exc) from exc
     await db.commit()
     return success_response(AttachedImageRead(image_id=image_id, file_id=body.file_id))
+
+
+@router.post(
+    "/shots/{shot_id}/video-from-file",
+    response_model=ApiResponse[AttachedVideoRead],
+    summary="创作模式：把上传的视频设为镜头成片",
+)
+async def attach_shot_video_api(
+    shot_id: str,
+    body: FileAttachRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[AttachedVideoRead]:
+    try:
+        file_id = await attach_shot_video(db, shot_id=shot_id, file_id=body.file_id)
+    except ValueError as exc:
+        raise _http_error(exc) from exc
+    await db.commit()
+    return success_response(AttachedVideoRead(shot_id=shot_id, file_id=file_id))
