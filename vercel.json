@@ -3,7 +3,13 @@
   "services": {
     "web": {
       "root": "front/",
-      "framework": "vite"
+      "framework": "vite",
+      "routes": [
+        {
+          "src": "/(?!assets/|env\\.js$|logo\\.svg$|mockServiceWorker\\.js$|index\\.html$).*",
+          "transforms": [{ "type": "request.path", "op": "set", "args": "/index.html" }]
+        }
+      ]
     },
     "api": {
       "root": "backend/",
@@ -18,6 +24,6 @@
     { "source": "/openapi.json", "destination": { "service": "api" } },
     { "source": "/assets/(.*)", "destination": { "service": "web" } },
     { "source": "/(env\\.js|logo\\.svg|mockServiceWorker\\.js)", "destination": { "service": "web" } },
-    { "source": "/(.*)", "destination": { "service": "web", "path": "/index.html" } }
+    { "source": "/(.*)", "destination": { "service": "web" } }
   ]
 }
