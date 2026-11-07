@@ -117,13 +117,24 @@ Symptom: uploads return 503 and every image / video task fails with
 (Vercel dashboard → Storage → the Blob store, or `GET /api/v1/_deploy/status`
 plus the Vercel API).
 
-Cause: the Hobby plan's included Blob usage for the month was used up (generated
-videos are 4–9 MB each and every board refresh loads thumbnails).
+Cause: the Hobby plan's included Blob usage was used up. Hobby includes, per
+30-day cycle and shared by **every project in the team**: 1 GB storage, 10 GB
+Blob data transfer, 10,000 simple and 2,000 advanced operations. When any of
+them is exceeded Vercel suspends *all* Blob stores of the team at once (reads
+included: public blob URLs answer 403, so existing thumbnails and videos stop
+showing too) and, per the docs, "you will have to wait until 30 days have
+passed before using Blob storage again". On 2026-11-07 the suspension hit at
+07:29 UTC; the team's usage API showed 3.6 GB of egress in the cycle, 95 % of it
+from another project's store (`gaming-arena-media`), ~0.1 GB from this app. Check
+with `GET /v2/usage?type=storage_blob&from=…&to=…&granularity=day` or the
+dashboard's Usage page.
 
 Fixes, pick one:
 
-1. Upgrade the Vercel team to Pro (the store resumes automatically).
-2. Wait for the monthly usage reset.
+1. Upgrade the Vercel team to Pro (or start the Pro trial offered on the store
+   page); the stores resume immediately.
+2. Wait for the 30-day window to pass (about 30 days after the suspension);
+   keep other projects' Blob traffic in mind, the allowance is team-wide.
 3. Point the backend at any S3-compatible bucket instead of Blob: set
    `S3_ENDPOINT_URL`, `S3_REGION_NAME`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`,
    `S3_BUCKET_NAME` (and `S3_PUBLIC_BASE_URL` for a public CDN host) in the
