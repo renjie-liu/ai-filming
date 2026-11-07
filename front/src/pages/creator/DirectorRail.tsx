@@ -29,8 +29,8 @@ export function collectRunningTasks(board: CreatorBoardRead | null): Array<{ nam
 
 export const STEP_TIPS: Record<CreatorStepKey, string> = {
   script: '粘贴剧本后点「一键拆分镜」。拆分只分析文字，不消耗生成额度，可以多试几次。',
-  cast: '先给主要角色生成形象，后面的关键帧和视频都会沿用，画面才不会换人。',
-  storyboard: '建议先生成关键帧看看构图，再去生成视频。一张关键帧比一段视频便宜得多。',
+  cast: '先定下主要角色的形象（AI 生成或上传自己的图），后面的关键帧和视频都会沿用，画面才不会换人。点卡片可以改设定、改提示词、选出现的镜头。',
+  storyboard: '点镜头卡可以改画面描述、景别运镜、对白和画面里的人物场景，也能上传自己的关键帧。先出关键帧看构图再生成视频，便宜得多。',
   video: '确认镜头和时长后开始生成，额度在此时才扣；失败的镜头看原因后单独重试。',
   final: '满意就下载片段；不满意的镜头回到「视频」单独重做，其余不受影响。',
 }

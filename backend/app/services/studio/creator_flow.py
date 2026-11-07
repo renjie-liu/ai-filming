@@ -12,10 +12,12 @@ import uuid
 from collections import defaultdict
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.studio import (
+    AssetQualityLevel,
+    AssetViewAngle,
     Chapter,
     Character,
     CharacterImage,
@@ -32,6 +34,7 @@ from app.models.studio import (
     SceneImage,
     Shot,
     ShotCandidateStatus,
+    ShotCandidateType,
     ShotCharacterLink,
     ShotDetail,
     ShotDialogLine,
@@ -59,10 +62,17 @@ from app.schemas.studio.creator import (
 from app.services.common import entity_not_found
 from app.services.studio.entity_crud import create_entity
 from app.services.studio.entity_thumbnails import download_url
-from app.services.studio.shot_extracted_candidates import mark_linked, set_skip_extraction
+from app.services.studio.shot_extracted_candidates import (
+    mark_linked,
+    mark_linked_by_name,
+    set_skip_extraction,
+)
 from app.services.studio.shot_extracted_dialogue_candidates import mark_accepted
-from app.services.studio.shot_preparation_state import link_existing_asset_for_preparation
+from app.services.studio.shot_preparation_state import (
+    link_existing_asset_for_preparation,
+)
 from app.services.studio.shot_status import recompute_shot_status
+from app.utils.project_links import upsert_project_link
 
 # 候选类型 → 实体模型 / 项目关联模型 / 图片模型 / 图片表上的外键字段
 _ASSET_SPECS: dict[str, tuple[type, type, type, str]] = {
@@ -302,7 +312,25 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
             eid = getattr(row, fk)
             asset_ids_by_shot[row.shot_id][entity_type].append(eid)
             asset_ids[entity_type].add(eid)
-    character_ids = sorted({cid for ids in chars_by_shot.values() for cid in ids})
+    # 实体范围 = 本章节镜头关联到的 + 项目级已建档的（其它集的角色 / 资产也列出，shot_count 为 0，可直接沿用到本集）
+    project_characters = list((await db.execute(select(Character).where(Character.project_id == project.id))).scalars().all())
+    linked_character_ids = {cid for ids in chars_by_shot.values() for cid in ids}
+    extra_character_ids = sorted(linked_character_ids - {c.id for c in project_characters})
+    if extra_character_ids:
+        project_characters += list((await db.execute(select(Character).where(Character.id.in_(extra_character_ids)))).scalars().all())
+    character_ids = [c.id for c in project_characters]
+    for entity_type, (_model, link_model, _img, fk) in _ASSET_SPECS.items():
+        for (eid,) in (await db.execute(select(getattr(link_model, fk)).where(link_model.project_id == project.id).distinct())).all():
+            asset_ids[entity_type].add(eid)
+    # 实体 → 本章节内出现的镜头（按镜头顺序）
+    shot_ids_by_entity: dict[str, list[str]] = defaultdict(list)
+    for shot in shots:
+        for cid in chars_by_shot.get(shot.id, []):
+            shot_ids_by_entity[cid].append(shot.id)
+        for ids in asset_ids_by_shot.get(shot.id, {}).values():
+            for eid in ids:
+                if shot.id not in shot_ids_by_entity[eid]:
+                    shot_ids_by_entity[eid].append(shot.id)
 
     # 首帧图片 / 任务
     frames = (await db.execute(select(ShotFrameImage).where(ShotFrameImage.shot_detail_id.in_(shot_ids), ShotFrameImage.frame_type == ShotFrameType.first))).scalars().all() if shot_ids else []
@@ -316,7 +344,7 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
     # 实体与形象图
     entities: list[CreatorEntityRead] = []
     entity_image_tasks: dict[str, dict[str, CreatorTaskRead]] = {}
-    characters = (await db.execute(select(Character).where(Character.id.in_(character_ids)))).scalars().all() if character_ids else []
+    characters = project_characters
     char_images: dict[str, list[CharacterImage]] = defaultdict(list)
     if character_ids:
         for img in (await db.execute(select(CharacterImage).where(CharacterImage.character_id.in_(character_ids)))).scalars().all():
@@ -325,16 +353,10 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
         db, relation_type="character_image", entity_ids=[str(i.id) for imgs in char_images.values() for i in imgs]
     )
     char_task_by_entity = await _latest_tasks(db, relation_type="character", entity_ids=character_ids)
-    shot_count_by_entity: dict[str, int] = defaultdict(int)
-    for ids in chars_by_shot.values():
-        for cid in ids:
-            shot_count_by_entity[cid] += 1
-    for per_shot in asset_ids_by_shot.values():
-        for ids in per_shot.values():
-            for eid in ids:
-                shot_count_by_entity[eid] += 1
+    shot_count_by_entity: dict[str, int] = {eid: len(ids) for eid, ids in shot_ids_by_entity.items()}
     char_names: dict[str, str] = {}
-    for ch in sorted(characters, key=lambda c: c.name):
+    # 本集用到的排前面，未用到的（沿用自其它集）排后面
+    for ch in sorted(characters, key=lambda c: (shot_count_by_entity.get(c.id, 0) == 0, c.name)):
         char_names[ch.id] = ch.name
         best = _best_image(char_images.get(ch.id, []))
         if best is not None and best.file_id:
@@ -351,6 +373,7 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
                 image_file_id=best.file_id if best is not None else None,
                 image_task=task,
                 shot_count=shot_count_by_entity.get(ch.id, 0),
+                shot_ids=shot_ids_by_entity.get(ch.id, []),
             )
         )
     asset_best_file: dict[str, str] = {}
@@ -363,7 +386,7 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
         for img in (await db.execute(select(image_model).where(getattr(image_model, fk).in_(ids)))).scalars().all():
             images[getattr(img, fk)].append(img)
         tasks = await _latest_tasks(db, relation_type=f"{entity_type}_image", entity_ids=[str(i.id) for imgs in images.values() for i in imgs])
-        for row in sorted(rows, key=lambda r: r.name):
+        for row in sorted(rows, key=lambda r: (shot_count_by_entity.get(r.id, 0) == 0, r.name)):
             best = _best_image(images.get(row.id, []))
             if best is not None and best.file_id:
                 file_ids.append(best.file_id)
@@ -379,6 +402,7 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
                     image_file_id=best.file_id if best is not None else None,
                     image_task=tasks.get(str(best.id)) if best is not None else None,
                     shot_count=shot_count_by_entity.get(row.id, 0),
+                    shot_ids=shot_ids_by_entity.get(row.id, []),
                 )
             )
 
@@ -409,7 +433,9 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
             ready_count += 1
         dialogue = [
             CreatorDialogueLineRead(
+                id=int(line.id),
                 speaker=char_names.get(getattr(line, "speaker_character_id", None) or "", getattr(line, "speaker_name", "") or ""),
+                speaker_character_id=getattr(line, "speaker_character_id", None),
                 text=line.text,
             )
             for line in lines_by_shot.get(shot.id, [])
@@ -422,6 +448,8 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
                 script_excerpt=shot.script_excerpt or "",
                 status=_enum_value(shot.status),
                 duration=duration,
+                camera_shot=_enum_value(detail.camera_shot) if detail is not None and detail.camera_shot else "",
+                movement=_enum_value(detail.movement) if detail is not None and detail.movement else "",
                 description=(detail.first_frame_prompt if detail is not None else "") or "",
                 dialogue=dialogue,
                 character_ids=chars_by_shot.get(shot.id, []),
@@ -460,6 +488,256 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
         divide_task=chapter_tasks_divide.get(chapter_id),
         extract_task=chapter_tasks_extract.get(chapter_id),
     )
+
+
+# ---------------------------------------------------------------------------
+# 创作页编辑：镜头 ↔ 实体关联、手动建档、上传图挂载
+# ---------------------------------------------------------------------------
+
+CREATOR_ENTITY_TYPES = ("character", "scene", "prop", "costume")
+
+
+class CreatorInputError(ValueError):
+    """输入不合法（实体类型不支持、实体不属于本作品等）；路由层映射为 400，其它 ValueError 为 404。"""
+
+
+def _require_entity_type(entity_type: str) -> str:
+    value = (entity_type or "").strip().lower()
+    if value not in CREATOR_ENTITY_TYPES:
+        raise CreatorInputError(f"unsupported entity_type: {entity_type}")
+    return value
+
+
+async def _load_shot_scope(db: AsyncSession, *, shot_id: str) -> tuple[Shot, Chapter, Project]:
+    """镜头及其章节 / 作品；任一缺失抛 ValueError（not found）。"""
+    shot = await db.get(Shot, shot_id)
+    if shot is None:
+        raise ValueError(entity_not_found("Shot"))
+    chapter = await db.get(Chapter, shot.chapter_id)
+    if chapter is None:
+        raise ValueError(entity_not_found("Chapter"))
+    project = await db.get(Project, chapter.project_id)
+    if project is None:
+        raise ValueError(entity_not_found("Project"))
+    return shot, chapter, project
+
+
+async def _load_chapter_scope(db: AsyncSession, *, chapter_id: str) -> tuple[Chapter, Project]:
+    chapter = await db.get(Chapter, chapter_id)
+    if chapter is None:
+        raise ValueError(entity_not_found("Chapter"))
+    project = await db.get(Project, chapter.project_id)
+    if project is None:
+        raise ValueError(entity_not_found("Project"))
+    return chapter, project
+
+
+async def _ignore_candidate_by_name(db: AsyncSession, *, shot_id: str, entity_type: str, name: str) -> None:
+    """用户主动解除关联时，把镜头内同名提取候选标记为 ignored；否则下一次 auto-confirm 会按名字把它重新挂回。"""
+    if not name:
+        return
+    stmt = (
+        update(ShotExtractedCandidate)
+        .where(
+            ShotExtractedCandidate.shot_id == shot_id,
+            ShotExtractedCandidate.candidate_type == ShotCandidateType(entity_type),
+            ShotExtractedCandidate.candidate_name == name,
+        )
+        .values(candidate_status=ShotCandidateStatus.ignored)
+    )
+    await db.execute(stmt)
+
+
+async def shot_entity_ids(db: AsyncSession, *, shot_id: str, entity_type: str) -> list[str]:
+    """镜头当前关联的某类实体 ID（角色按画面内 index 排序，资产按关联顺序）。"""
+    et = _require_entity_type(entity_type)
+    if et == "character":
+        stmt = select(ShotCharacterLink).where(ShotCharacterLink.shot_id == shot_id).order_by(ShotCharacterLink.index.asc(), ShotCharacterLink.id.asc())
+        return [row.character_id for row in (await db.execute(stmt)).scalars().all()]
+    _model, link_model, _img, fk = _ASSET_SPECS[et]
+    rows = (await db.execute(select(link_model).where(link_model.shot_id == shot_id).order_by(link_model.id.asc()))).scalars().all()
+    return list(dict.fromkeys(getattr(row, fk) for row in rows))
+
+
+async def set_shot_entity_links(db: AsyncSession, *, shot_id: str, entity_type: str, entity_ids: list[str]) -> list[str]:
+    """整体替换镜头某一类「画面里会用到」的实体（创作页分镜卡编辑）。
+
+    - 新增：建立关联，并把镜头内同名提取候选标记为 linked；
+    - 移除：删除关联，并把同名候选标记为 ignored（避免下次自动确认挂回）；
+    - 角色按传入顺序重排 index（先删后建，避开 (shot_id, index) 唯一约束）。
+    返回最终关联的实体 ID；调用方负责提交事务。
+    """
+    et = _require_entity_type(entity_type)
+    _shot, chapter, project = await _load_shot_scope(db, shot_id=shot_id)
+    wanted = list(dict.fromkeys(i for i in entity_ids if i))
+    current = await shot_entity_ids(db, shot_id=shot_id, entity_type=et)
+    added = [i for i in wanted if i not in current]
+    removed = [i for i in current if i not in wanted]
+
+    model = Character if et == "character" else _ASSET_SPECS[et][0]
+    involved = sorted(set(current) | set(wanted))
+    names = {obj.id: obj.name for obj in (await db.execute(select(model).where(model.id.in_(involved)))).scalars().all()} if involved else {}
+    for eid in wanted:
+        if eid not in names:
+            raise ValueError(entity_not_found(model.__name__))
+
+    if et == "character":
+        for cid in wanted:
+            character = await db.get(Character, cid)
+            if character is not None and character.project_id != project.id:
+                raise CreatorInputError("Character does not belong to the same project")
+        if wanted != current:
+            for row in (await db.execute(select(ShotCharacterLink).where(ShotCharacterLink.shot_id == shot_id))).scalars().all():
+                await db.delete(row)
+            await db.flush()
+            for idx, cid in enumerate(wanted):
+                db.add(ShotCharacterLink(shot_id=shot_id, character_id=cid, index=idx, note=""))
+            await db.flush()
+    else:
+        _model, link_model, _img, fk = _ASSET_SPECS[et]
+        if removed:
+            for row in (await db.execute(select(link_model).where(link_model.shot_id == shot_id, getattr(link_model, fk).in_(removed)))).scalars().all():
+                await db.delete(row)
+            await db.flush()
+        for eid in added:
+            await upsert_project_link(
+                db, model=link_model, asset_field=fk, asset_id=eid, project_id=project.id, chapter_id=chapter.id, shot_id=shot_id  # type: ignore[arg-type]
+            )
+
+    for eid in added:
+        await mark_linked_by_name(db, shot_id=shot_id, candidate_type=et, candidate_name=names[eid], linked_entity_id=eid)
+    for eid in removed:
+        await _ignore_candidate_by_name(db, shot_id=shot_id, entity_type=et, name=names.get(eid, ""))
+    return wanted
+
+
+async def set_entity_shots(db: AsyncSession, *, chapter_id: str, entity_type: str, entity_id: str, shot_ids: list[str]) -> list[str]:
+    """设置实体在本章节内出现的镜头集合（创作页角色场景卡编辑）。
+
+    不在列表里的本章节镜头会解除关联；一个镜头都不选时实体仍保留在作品里（资产保留项目级关联）。
+    返回最终关联的镜头 ID（按镜头顺序）。
+    """
+    et = _require_entity_type(entity_type)
+    chapter, project = await _load_chapter_scope(db, chapter_id=chapter_id)
+    model = Character if et == "character" else _ASSET_SPECS[et][0]
+    entity = await db.get(model, entity_id)
+    if entity is None:
+        raise ValueError(entity_not_found(model.__name__))
+    if et == "character" and entity.project_id != project.id:
+        raise CreatorInputError("Character does not belong to the same project")
+
+    wanted = set(shot_ids)
+    result: list[str] = []
+    shots = (await db.execute(select(Shot).where(Shot.chapter_id == chapter_id).order_by(Shot.index.asc()))).scalars().all()
+    for shot in shots:
+        current = await shot_entity_ids(db, shot_id=shot.id, entity_type=et)
+        present = entity_id in current
+        if shot.id in wanted:
+            result.append(shot.id)
+            if not present:
+                await set_shot_entity_links(db, shot_id=shot.id, entity_type=et, entity_ids=[*current, entity_id])
+        elif present:
+            await set_shot_entity_links(db, shot_id=shot.id, entity_type=et, entity_ids=[i for i in current if i != entity_id])
+
+    if et != "character":
+        _model, link_model, _img, fk = _ASSET_SPECS[et]
+        exists = (await db.execute(select(link_model.id).where(getattr(link_model, fk) == entity_id, link_model.project_id == project.id).limit(1))).first()
+        if exists is None:
+            await upsert_project_link(db, model=link_model, asset_field=fk, asset_id=entity_id, project_id=project.id, chapter_id=chapter.id, shot_id=None)  # type: ignore[arg-type]
+    return result
+
+
+async def create_chapter_entity(db: AsyncSession, *, chapter_id: str, entity_type: str, name: str, description: str, shot_ids: list[str]) -> str:
+    """创作页手动新增角色 / 场景 / 道具 / 服装（沿用作品的题材 / 画面风格），并挂到指定镜头。返回实体 ID。"""
+    et = _require_entity_type(entity_type)
+    chapter, project = await _load_chapter_scope(db, chapter_id=chapter_id)
+    clean_name = (name or "").strip()
+    if not clean_name:
+        raise CreatorInputError("name is required")
+    payload = await create_entity(
+        db,
+        entity_type=et,
+        body={
+            "id": uuid.uuid4().hex,
+            "name": clean_name,
+            "description": description or "",
+            "style": _enum_value(project.style),
+            "visual_style": _enum_value(project.visual_style),
+            "project_id": project.id,
+            "chapter_id": chapter.id,
+        },
+    )
+    entity_id = str(payload["id"])
+    await set_entity_shots(db, chapter_id=chapter_id, entity_type=et, entity_id=entity_id, shot_ids=list(shot_ids))
+    return entity_id
+
+
+def _file_format(file: FileItem) -> str:
+    """从文件名推断图片格式，写入图片行的 format 字段。"""
+    name = (file.name or "").lower()
+    for ext, fmt in ((".jpg", "jpeg"), (".jpeg", "jpeg"), (".png", "png"), (".webp", "webp"), (".gif", "gif")):
+        if name.endswith(ext):
+            return fmt
+    return "png"
+
+
+async def attach_entity_image(db: AsyncSession, *, entity_type: str, entity_id: str, file_id: str) -> int:
+    """把已上传的文件设为实体的形象 / 参考图，并成为卡片展示与关键帧 / 视频参考用的「最佳图」。
+
+    - 角色：新建一张正面 CharacterImage 并设为主图（其它主图取消）；
+    - 场景 / 道具 / 服装：图片行按 (实体, 精度, 角度) 唯一，直接把文件写进当前展示的那一行（无行时新建正面图）。
+    返回图片行 ID。
+    """
+    et = _require_entity_type(entity_type)
+    file = await db.get(FileItem, file_id)
+    if file is None:
+        raise ValueError(entity_not_found("FileItem"))
+    fmt = _file_format(file)
+    if et == "character":
+        if await db.get(Character, entity_id) is None:
+            raise ValueError(entity_not_found("Character"))
+        for img in (await db.execute(select(CharacterImage).where(CharacterImage.character_id == entity_id, CharacterImage.is_primary.is_(True)))).scalars().all():
+            img.is_primary = False
+        image: Any = CharacterImage(
+            character_id=entity_id, file_id=file_id, quality_level=AssetQualityLevel.low, view_angle=AssetViewAngle.front, format=fmt, is_primary=True
+        )
+    else:
+        model, _link, image_model, fk = _ASSET_SPECS[et]
+        if await db.get(model, entity_id) is None:
+            raise ValueError(entity_not_found(model.__name__))
+        rows = list((await db.execute(select(image_model).where(getattr(image_model, fk) == entity_id).order_by(image_model.id.asc()))).scalars().all())
+        current = _best_image(rows)
+        if current is not None:
+            current.file_id = file_id
+            current.format = fmt
+            await db.flush()
+            await db.refresh(current)
+            return int(current.id)
+        image = image_model(**{fk: entity_id, "file_id": file_id, "quality_level": AssetQualityLevel.low, "view_angle": AssetViewAngle.front, "format": fmt})
+    db.add(image)
+    await db.flush()
+    await db.refresh(image)
+    return int(image.id)
+
+
+async def attach_shot_keyframe(db: AsyncSession, *, shot_id: str, file_id: str) -> int:
+    """把已上传的文件设为镜头首帧（关键帧）：有槽位则覆盖，否则新建。返回 ShotFrameImage.id。"""
+    if await db.get(ShotDetail, shot_id) is None:
+        raise ValueError(entity_not_found("ShotDetail"))
+    file = await db.get(FileItem, file_id)
+    if file is None:
+        raise ValueError(entity_not_found("FileItem"))
+    stmt = select(ShotFrameImage).where(ShotFrameImage.shot_detail_id == shot_id, ShotFrameImage.frame_type == ShotFrameType.first).limit(1)
+    frame = (await db.execute(stmt)).scalars().first()
+    if frame is None:
+        frame = ShotFrameImage(shot_detail_id=shot_id, frame_type=ShotFrameType.first, file_id=file_id, format=_file_format(file))
+        db.add(frame)
+    else:
+        frame.file_id = file_id
+        frame.format = _file_format(file)
+    await db.flush()
+    await db.refresh(frame)
+    return int(frame.id)
 
 
 # ---------------------------------------------------------------------------

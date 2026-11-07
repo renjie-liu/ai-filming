@@ -27,9 +27,11 @@ class CreatorTaskRead(_ReadModel):
 
 
 class CreatorDialogueLineRead(_ReadModel):
-    """镜头对白行（已确认）。"""
+    """镜头对白行（已确认）；带行 ID 以便在分镜卡里直接增删改。"""
 
+    id: int = Field(..., description="对白行 ID（ShotDialogLine.id）")
     speaker: str = Field("", description="说话角色名；旁白为空")
+    speaker_character_id: str | None = Field(None, description="说话角色 ID（已关联到角色时）")
     text: str = Field(..., description="台词")
 
 
@@ -42,6 +44,8 @@ class CreatorShotRead(_ReadModel):
     script_excerpt: str = ""
     status: str = Field(..., description="shot.status：pending / ready（信息确认状态）")
     duration: int = Field(0, description="时长（秒）")
+    camera_shot: str = Field("", description="景别 code（ECU / CU / MCU / MS / MLS / LS / ELS）")
+    movement: str = Field("", description="运镜 code（STATIC / PAN / DOLLY_IN …）")
     description: str = Field("", description="画面描述（首帧提示词；AI 生成后可编辑）")
     dialogue: list[CreatorDialogueLineRead] = Field(default_factory=list)
     character_ids: list[str] = Field(default_factory=list)
@@ -67,7 +71,8 @@ class CreatorEntityRead(_ReadModel):
     image_id: int | None = Field(None, description="形象图行 ID（创建图片任务时使用）")
     image_file_id: str | None = Field(None, description="形象图文件 ID（作为关键帧 / 视频的参考图）")
     image_task: CreatorTaskRead | None = Field(None, description="最近一次形象图任务")
-    shot_count: int = Field(0, description="本章节内出现的镜头数")
+    shot_count: int = Field(0, description="本章节内出现的镜头数；0 表示本集尚未用到（可能沿用自其它集）")
+    shot_ids: list[str] = Field(default_factory=list, description="本章节内出现的镜头 ID")
 
 
 class CreatorProjectRead(_ReadModel):
@@ -115,6 +120,55 @@ class AutoConfirmResultRead(_ReadModel):
     created_entities: int = Field(0, description="新建的实体数")
     skipped_shots: int = Field(0, description="因没有提取结果而标记为无需提取的镜头数")
     ready_shots: int = Field(0, description="处理后处于 ready 的镜头数")
+
+
+# ---------------------------------------------------------------------------
+# 创作页编辑动作（写模型）
+# ---------------------------------------------------------------------------
+
+CreatorEntityType = Literal["character", "scene", "prop", "costume"]
+
+
+class ShotEntityLinksWrite(BaseModel):
+    """按类型整体替换镜头「画面里会用到」的实体；为 None 的类型保持不变。"""
+
+    character_ids: list[str] | None = Field(None, description="角色 ID 列表（按画面内顺序）")
+    scene_ids: list[str] | None = None
+    prop_ids: list[str] | None = None
+    costume_ids: list[str] | None = None
+
+
+class EntityShotsWrite(BaseModel):
+    """设置某个实体在本章节内出现的镜头集合（不在列表里的镜头会解除关联）。"""
+
+    shot_ids: list[str] = Field(default_factory=list)
+
+
+class CreatorEntityCreate(BaseModel):
+    """创作页手动新增角色 / 场景 / 道具 / 服装，并可直接挂到若干镜头。"""
+
+    type: CreatorEntityType
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str = Field("", description="设定描述；会作为形象图提示词的素材")
+    shot_ids: list[str] = Field(default_factory=list)
+
+
+class FileAttachRequest(BaseModel):
+    """把已上传的文件（`POST /studio/files/upload` 返回的 id）挂到某个资源上。"""
+
+    file_id: str
+
+
+class CreatorEntityCreatedRead(_ReadModel):
+    type: str
+    id: str
+
+
+class AttachedImageRead(_ReadModel):
+    """上传图挂载结果：图片行 ID 与文件 ID。"""
+
+    image_id: int
+    file_id: str
 
 
 class ProjectOverviewRead(_ReadModel):

@@ -2,19 +2,27 @@ import {
   FilmService,
   ScriptProcessingService,
   StudioChaptersService,
+  StudioCreatorService,
   StudioEntitiesService,
+  StudioFilesService,
   StudioImageTasksService,
   StudioShotDetailsService,
+  StudioShotDialogLinesService,
   StudioShotsService,
 } from '../../services/generated'
 import type {
+  CameraMovement,
+  CameraShotType,
   ChapterRead,
   CreatorBoardRead,
+  CreatorDialogueLineRead,
   CreatorEntityRead,
   CreatorShotRead,
+  ShotDetailUpdate,
   ShotLinkedAssetItem,
   VideoGenerationTaskRequest,
 } from '../../services/generated'
+import { downscaleImage } from '../../utils/imageResize'
 import { assertSucceeded, pollTask } from './taskPolling'
 
 /**
@@ -147,11 +155,13 @@ export async function prepareChapter(args: { projectId: string; chapterId: strin
   onLog(`识别完成：${entityNote}，已自动关联到镜头；对白 ${summary?.accepted_dialogues ?? 0} 条`)
 }
 
-/** 为角色 / 场景 / 道具 / 服装生成一张形象图（没有图片槽位时先创建）。 */
-export async function generateEntityImage(entity: CreatorEntityRead): Promise<void> {
+/**
+ * 渲染实体形象图的提示词（按名称 / 设定描述 / 作品风格），供用户查看、修改后再生成。
+ * 场景 / 道具 / 服装没有图片槽位时顺便创建一个；角色按角色级生成，不需要槽位。
+ */
+export async function renderEntityPrompt(entity: CreatorEntityRead): Promise<{ prompt: string; imageId: number | null }> {
   let imageId = entity.image_id ?? null
-  // 角色不需要预建图片槽位（后端按角色级生成并自动创建首张形象图）；场景 / 道具 / 服装需要。
-  if (entity.type !== 'character' && (imageId === null || imageId === undefined)) {
+  if (entity.type !== 'character' && imageId === null) {
     const created = await StudioEntitiesService.createEntityImageApiV1StudioEntitiesEntityTypeEntityIdImagesPost({
       entityType: entity.type,
       entityId: entity.id,
@@ -161,31 +171,167 @@ export async function generateEntityImage(entity: CreatorEntityRead): Promise<vo
     if (typeof id !== 'number') throw new Error('创建图片槽位失败')
     imageId = id
   }
+  const rendered =
+    entity.type === 'character'
+      ? await StudioImageTasksService.renderCharacterImagePromptApiV1StudioImageTasksCharactersCharacterIdRenderPromptPost({
+          characterId: entity.id,
+          requestBody: { image_id: imageId },
+        })
+      : await StudioImageTasksService.renderAssetImagePromptApiV1StudioImageTasksAssetsAssetTypeAssetIdRenderPromptPost({
+          assetType: entity.type,
+          assetId: entity.id,
+          requestBody: { image_id: imageId },
+        })
+  return { prompt: rendered.data?.prompt?.trim() ?? '', imageId }
+}
+
+/**
+ * 为角色 / 场景 / 道具 / 服装生成一张形象图。
+ * 不传 prompt 时用默认渲染的提示词；传入时按用户改过的提示词出图。
+ */
+export async function generateEntityImage(entity: CreatorEntityRead, prompt?: string): Promise<void> {
+  let finalPrompt = prompt?.trim() ?? ''
+  let imageId = entity.image_id ?? null
+  if (!finalPrompt || (entity.type !== 'character' && imageId === null)) {
+    const rendered = await renderEntityPrompt(entity)
+    imageId = rendered.imageId
+    if (!finalPrompt) finalPrompt = rendered.prompt
+  }
+  if (!finalPrompt) throw new Error(entity.type === 'character' ? '没有生成出形象描述' : '没有生成出参考图描述')
   if (entity.type === 'character') {
-    const rendered = await StudioImageTasksService.renderCharacterImagePromptApiV1StudioImageTasksCharactersCharacterIdRenderPromptPost({
-      characterId: entity.id,
-      requestBody: { image_id: imageId },
-    })
-    const prompt = rendered.data?.prompt?.trim()
-    if (!prompt) throw new Error('没有生成出形象描述')
     await StudioImageTasksService.createCharacterImageGenerationTaskApiV1StudioImageTasksCharactersCharacterIdImageTasksPost({
       characterId: entity.id,
-      requestBody: { image_id: imageId, prompt },
+      requestBody: { image_id: imageId, prompt: finalPrompt },
     })
     return
   }
-  const rendered = await StudioImageTasksService.renderAssetImagePromptApiV1StudioImageTasksAssetsAssetTypeAssetIdRenderPromptPost({
-    assetType: entity.type,
-    assetId: entity.id,
-    requestBody: { image_id: imageId },
-  })
-  const prompt = rendered.data?.prompt?.trim()
-  if (!prompt) throw new Error('没有生成出参考图描述')
   await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({
     assetType: entity.type,
     assetId: entity.id,
-    requestBody: { image_id: imageId, prompt },
+    requestBody: { image_id: imageId, prompt: finalPrompt },
   })
+}
+
+// ---------------------------------------------------------------------------
+// 角色场景 / 分镜的编辑动作（P2）
+// ---------------------------------------------------------------------------
+
+export type UploadScope = {
+  projectId: string
+  chapterId?: string | null
+  shotId?: string | null
+  usageKind: 'character_image' | 'asset_image' | 'shot_frame' | 'upload'
+}
+
+/** 上传一张图片：先在浏览器缩到 2K 以内（避开函数请求体上限），再建文件记录；返回文件 ID。 */
+export async function uploadImage(file: File, scope: UploadScope): Promise<string> {
+  const prepared = await downscaleImage(file)
+  const res = await StudioFilesService.uploadFileApiApiV1StudioFilesUploadPost({
+    formData: {
+      // 生成客户端把 File 原样放进 multipart；类型声明里是 string（OpenAPI binary）。
+      file: prepared as unknown as string,
+      project_id: scope.projectId,
+      chapter_id: scope.chapterId ?? null,
+      shot_id: scope.shotId ?? null,
+      usage_kind: scope.usageKind,
+    },
+  })
+  const id = res.data?.id
+  if (!id) throw new Error(res.message || '上传失败')
+  return id
+}
+
+/** 用自己的图片作为角色形象 / 场景道具参考图（替代 AI 生成）。 */
+export async function uploadEntityImage(entity: CreatorEntityRead, file: File, scope: { projectId: string; chapterId: string }): Promise<void> {
+  const fileId = await uploadImage(file, { ...scope, usageKind: entity.type === 'character' ? 'character_image' : 'asset_image' })
+  await StudioCreatorService.attachEntityImageApiApiV1StudioCreatorEntitiesEntityTypeEntityIdImageFromFilePost({
+    entityType: entity.type,
+    entityId: entity.id,
+    requestBody: { file_id: fileId },
+  })
+}
+
+/** 用自己的图片作为镜头关键帧（首帧）。 */
+export async function uploadShotKeyframe(shot: CreatorShotRead, file: File, scope: { projectId: string; chapterId: string }): Promise<void> {
+  const fileId = await uploadImage(file, { ...scope, shotId: shot.id, usageKind: 'shot_frame' })
+  await StudioCreatorService.attachShotKeyframeApiApiV1StudioCreatorShotsShotIdKeyframeFromFilePost({
+    shotId: shot.id,
+    requestBody: { file_id: fileId },
+  })
+}
+
+/** 整体替换镜头「画面里会用到」的实体（按类型；未传的类型不变）。 */
+export async function setShotLinks(shotId: string, links: { characterIds?: string[]; sceneIds?: string[]; propIds?: string[] }): Promise<void> {
+  await StudioCreatorService.setShotLinksApiApiV1StudioCreatorShotsShotIdLinksPut({
+    shotId,
+    requestBody: { character_ids: links.characterIds ?? null, scene_ids: links.sceneIds ?? null, prop_ids: links.propIds ?? null },
+  })
+}
+
+/** 设置实体在本集出现的镜头（不选任何镜头时实体仍保留在作品里）。 */
+export async function setEntityShots(chapterId: string, entity: CreatorEntityRead, shotIds: string[]): Promise<void> {
+  await StudioCreatorService.setEntityShotsApiApiV1StudioCreatorChaptersChapterIdEntitiesEntityTypeEntityIdShotsPut({
+    chapterId,
+    entityType: entity.type,
+    entityId: entity.id,
+    requestBody: { shot_ids: shotIds },
+  })
+}
+
+/** 手动新增角色 / 场景 / 道具并挂到镜头；返回实体 ID。 */
+export async function createEntity(args: { chapterId: string; type: CreatorEntityRead['type']; name: string; description: string; shotIds: string[] }): Promise<string> {
+  const res = await StudioCreatorService.createChapterEntityApiApiV1StudioCreatorChaptersChapterIdEntitiesPost({
+    chapterId: args.chapterId,
+    requestBody: { type: args.type, name: args.name.trim(), description: args.description.trim(), shot_ids: args.shotIds },
+  })
+  if (!res.data?.id) throw new Error(res.message || '新增失败')
+  return res.data.id
+}
+
+/** 改实体名称 / 设定描述。 */
+export async function updateEntity(entity: CreatorEntityRead, patch: { name: string; description: string }): Promise<void> {
+  await StudioEntitiesService.updateEntityApiV1StudioEntitiesEntityTypeEntityIdPatch({
+    entityType: entity.type,
+    entityId: entity.id,
+    requestBody: { name: patch.name.trim() || entity.name, description: patch.description },
+  })
+}
+
+/** 从作品里删除实体（镜头关联与形象图一并删除）。 */
+export async function deleteEntity(entity: CreatorEntityRead): Promise<void> {
+  await StudioEntitiesService.deleteEntityApiV1StudioEntitiesEntityTypeEntityIdDelete({ entityType: entity.type, entityId: entity.id })
+}
+
+export type DialogueDraft = { id?: number; speakerCharacterId: string | null; speakerName: string; text: string }
+
+/**
+ * 保存镜头对白：删掉被移除的行、更新改过的行、把新行接在现有行之后（序号按镜头内唯一约束递增）。
+ */
+export async function saveDialogue(shotId: string, drafts: DialogueDraft[], existing: CreatorDialogueLineRead[]): Promise<void> {
+  const keep = new Set(drafts.map((d) => d.id).filter((id): id is number => typeof id === 'number'))
+  for (const line of existing) {
+    if (!keep.has(line.id)) await StudioShotDialogLinesService.deleteShotDialogLineApiV1StudioShotDialogLinesLineIdDelete({ lineId: line.id })
+  }
+  const listed = await StudioShotDialogLinesService.listShotDialogLinesApiV1StudioShotDialogLinesGet({ shotDetailId: shotId, page: 1, pageSize: 100 })
+  let nextIndex = (listed.data?.items ?? []).reduce((m, l) => Math.max(m, l.index ?? 0), -1) + 1
+  for (const draft of drafts) {
+    const text = draft.text.trim()
+    if (!text) continue
+    const speakerName = draft.speakerName.trim() || null
+    if (typeof draft.id === 'number') {
+      const prev = existing.find((l) => l.id === draft.id)
+      const unchanged = prev && prev.text === text && (prev.speaker_character_id ?? null) === draft.speakerCharacterId && (prev.speaker || null) === speakerName
+      if (unchanged) continue
+      await StudioShotDialogLinesService.updateShotDialogLineApiV1StudioShotDialogLinesLineIdPatch({
+        lineId: draft.id,
+        requestBody: { text, speaker_character_id: draft.speakerCharacterId, speaker_name: speakerName },
+      })
+    } else {
+      await StudioShotDialogLinesService.createShotDialogLineApiV1StudioShotDialogLinesPost({
+        requestBody: { shot_detail_id: shotId, index: nextIndex++, text, speaker_character_id: draft.speakerCharacterId, speaker_name: speakerName },
+      })
+    }
+  }
 }
 
 /** 镜头里会用到的实体（按角色 → 场景 → 道具排序）。 */
@@ -258,14 +404,14 @@ export async function addShot(args: { chapterId: string; index: number; title: s
   await StudioChaptersService.autoConfirmChapterApiApiV1StudioChaptersChapterIdAutoConfirmPost({ chapterId })
 }
 
-/** 保存镜头卡片上可编辑的字段。 */
-export async function saveShot(args: { shotId: string; title: string; description: string; duration: number }): Promise<void> {
-  const { shotId, title, description, duration } = args
+/** 保存镜头卡片上可编辑的字段：标题、画面描述、时长，以及可选的景别 / 运镜。 */
+export async function saveShot(args: { shotId: string; title: string; description: string; duration: number; cameraShot?: string; movement?: string }): Promise<void> {
+  const { shotId, title, description, duration, cameraShot, movement } = args
   await StudioShotsService.updateShotApiV1StudioShotsShotIdPatch({ shotId, requestBody: { title } })
-  await StudioShotDetailsService.updateShotDetailApiV1StudioShotDetailsShotIdPatch({
-    shotId,
-    requestBody: { first_frame_prompt: description, duration },
-  })
+  const body: ShotDetailUpdate = { first_frame_prompt: description, duration }
+  if (cameraShot) body.camera_shot = cameraShot as CameraShotType
+  if (movement) body.movement = movement as CameraMovement
+  await StudioShotDetailsService.updateShotDetailApiV1StudioShotDetailsShotIdPatch({ shotId, requestBody: body })
 }
 
 export async function deleteShot(shotId: string): Promise<void> {

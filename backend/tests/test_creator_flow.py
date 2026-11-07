@@ -20,10 +20,18 @@ from app.models.studio import (
     ShotDialogLine,
     ShotStatus,
 )
-from app.services.studio.creator_flow import auto_confirm_chapter, build_creator_board, build_projects_overview
+from app.services.studio.creator_flow import (
+    auto_confirm_chapter,
+    build_creator_board,
+    build_projects_overview,
+)
 from app.services.studio.shot_detail_defaults import build_default_shot_detail
-from app.services.studio.shot_extracted_candidates import replace_for_shot as replace_candidates
-from app.services.studio.shot_extracted_dialogue_candidates import replace_for_shot as replace_dialogue_candidates
+from app.services.studio.shot_extracted_candidates import (
+    replace_for_shot as replace_candidates,
+)
+from app.services.studio.shot_extracted_dialogue_candidates import (
+    replace_for_shot as replace_dialogue_candidates,
+)
 
 
 async def _build_session() -> tuple[AsyncSession, object]:
@@ -134,4 +142,96 @@ async def test_creator_board_and_overview_aggregate() -> None:
         overview = await build_projects_overview(db)
         assert len(overview) == 1
         assert overview[0].chapter_count == 1 and overview[0].shot_count == 2 and overview[0].latest_chapter_id == "c1"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_creator_edit_links_manual_entities_and_uploads() -> None:
+    """创作页编辑：改镜头关联（移除后不被自动确认挂回）、手动建档、按实体设置镜头、上传图挂为形象 / 关键帧。"""
+    from app.models.studio import (
+        CharacterImage,
+        FileItem,
+        FileType,
+        Prop,
+        ShotCandidateStatus,
+        ShotExtractedCandidate,
+        ShotFrameImage,
+    )
+    from app.services.studio.creator_flow import (
+        CreatorInputError,
+        attach_entity_image,
+        attach_shot_keyframe,
+        create_chapter_entity,
+        set_entity_shots,
+        set_shot_entity_links,
+    )
+
+    db, engine = await _build_session()
+    async with db:
+        await _seed(db)
+        await auto_confirm_chapter(db, chapter_id="c1")
+        board = await build_creator_board(db, chapter_id="c1")
+        character = next(e for e in board.entities if e.type == "character")
+        assert character.shot_ids == ["s1", "s2"] and character.shot_count == 2
+        assert board.shots[0].dialogue[0].id > 0 and board.shots[0].camera_shot
+
+        # 从镜头 2 移除角色：关联删除、候选 ignored，再次自动确认不会挂回
+        assert await set_shot_entity_links(db, shot_id="s2", entity_type="character", entity_ids=[]) == []
+        cand = (await db.execute(select(ShotExtractedCandidate).where(ShotExtractedCandidate.shot_id == "s2", ShotExtractedCandidate.candidate_name == "雷霆总监"))).scalars().one()
+        assert cand.candidate_status == ShotCandidateStatus.ignored
+        await auto_confirm_chapter(db, chapter_id="c1")
+        board = await build_creator_board(db, chapter_id="c1")
+        assert board.shots[1].character_ids == []
+        assert next(e for e in board.entities if e.type == "character").shot_count == 1
+
+        # 重新挂回并保持顺序
+        await set_shot_entity_links(db, shot_id="s2", entity_type="character", entity_ids=[character.id])
+        board = await build_creator_board(db, chapter_id="c1")
+        assert board.shots[1].character_ids == [character.id]
+
+        # 手动新增道具挂到两个镜头 → 按实体改为只在镜头 2 → 一个都不选仍留在作品里
+        prop_id = await create_chapter_entity(db, chapter_id="c1", entity_type="prop", name="闪电马克杯", description="闪电造型", shot_ids=["s1", "s2"])
+        board = await build_creator_board(db, chapter_id="c1")
+        prop = next(e for e in board.entities if e.type == "prop")
+        assert prop.id == prop_id and prop.shot_ids == ["s1", "s2"] and board.shots[0].prop_ids == [prop_id]
+        assert await set_entity_shots(db, chapter_id="c1", entity_type="prop", entity_id=prop_id, shot_ids=["s2"]) == ["s2"]
+        board = await build_creator_board(db, chapter_id="c1")
+        assert next(e for e in board.entities if e.type == "prop").shot_ids == ["s2"] and board.shots[0].prop_ids == []
+        await set_entity_shots(db, chapter_id="c1", entity_type="prop", entity_id=prop_id, shot_ids=[])
+        board = await build_creator_board(db, chapter_id="c1")
+        assert next(e for e in board.entities if e.type == "prop").shot_count == 0
+        assert (await db.get(Prop, prop_id)) is not None
+
+        # 其它集建档的角色也出现在本集（shot_count 0，排在后面）
+        await create_chapter_entity(db, chapter_id="c1", entity_type="character", name="海洋", description="运维", shot_ids=[])
+        board = await build_creator_board(db, chapter_id="c1")
+        names = [e.name for e in board.entities if e.type == "character"]
+        assert names == ["雷霆总监", "海洋"]
+
+        # 上传图：角色主图切换、场景参考图、镜头关键帧
+        db.add_all(
+            [
+                FileItem(id="f1", type=FileType.image, name="face.jpg", thumbnail="https://blob/face.jpg", tags=[], storage_key="files/a/face.jpg"),
+                FileItem(id="f2", type=FileType.image, name="office.png", thumbnail="https://blob/office.png", tags=[], storage_key="files/b/office.png"),
+            ]
+        )
+        await db.flush()
+        image_id = await attach_entity_image(db, entity_type="character", entity_id=character.id, file_id="f1")
+        images = (await db.execute(select(CharacterImage).where(CharacterImage.character_id == character.id))).scalars().all()
+        assert [i.id for i in images if i.is_primary] == [image_id] and images[-1].format == "jpeg"
+        scene = next(e for e in board.entities if e.type == "scene")
+        await attach_entity_image(db, entity_type="scene", entity_id=scene.id, file_id="f2")
+        frame_id = await attach_shot_keyframe(db, shot_id="s1", file_id="f2")
+        assert await attach_shot_keyframe(db, shot_id="s1", file_id="f1") == frame_id  # 覆盖同一槽位
+        board = await build_creator_board(db, chapter_id="c1")
+        assert next(e for e in board.entities if e.type == "character").thumbnail == "https://blob/face.jpg"
+        assert next(e for e in board.entities if e.type == "scene").thumbnail == "https://blob/office.png"
+        assert board.shots[0].keyframe_file_id == "f1" and board.summary.keyframe_count == 1
+        frames = (await db.execute(select(ShotFrameImage).where(ShotFrameImage.shot_detail_id == "s1"))).scalars().all()
+        assert len(frames) == 1
+
+        with pytest.raises(CreatorInputError):
+            await set_shot_entity_links(db, shot_id="s1", entity_type="actor", entity_ids=[])
+        with pytest.raises(ValueError):
+            await attach_shot_keyframe(db, shot_id="missing", file_id="f1")
     await engine.dispose()

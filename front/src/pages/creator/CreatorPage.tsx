@@ -215,7 +215,7 @@ const CreatorPage: React.FC = () => {
     }
     switch (step) {
       case 'cast':
-        return <CastStep board={board} onNext={() => setStep('storyboard')} onTaskStarted={pollSoon} />
+        return <CastStep board={board} onNext={() => setStep('storyboard')} onTaskStarted={pollSoon} onChanged={refresh} />
       case 'storyboard':
         return <StoryboardStep board={board} onNext={() => setStep('video')} onTaskStarted={pollSoon} onChanged={refresh} batchRef={storyboardBatch} />
       case 'video':

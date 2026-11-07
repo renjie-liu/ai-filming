@@ -51,6 +51,9 @@ const RULES: Array<[RegExp, string | ((m: RegExpMatchArray) => string)]> = [
   [/is required/i, '缺少必填信息，请补充后重试'],
   [/already exists/i, '数据已存在'],
   [/not found/i, '数据不存在或已被删除，请刷新页面'],
+  // ---- 上传 ----
+  [/Request Entity Too Large|Payload Too Large|FUNCTION_PAYLOAD_TOO_LARGE|\b413\b/i, '图片太大，请换一张 4 MB 以内的图片'],
+  [/Unsupported file type|unsupported (image|media) type/i, '不支持的图片格式，请使用 JPG / PNG / WebP'],
   // ---- HTTP 状态文本 ----
   [/^Bad Request$/i, '请求参数有误'],
   [/^Not Found$/i, '数据不存在或已被删除'],

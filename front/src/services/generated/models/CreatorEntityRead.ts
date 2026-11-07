@@ -28,8 +28,12 @@ export type CreatorEntityRead = {
      */
     image_task: (CreatorTaskRead | null);
     /**
-     * 本章节内出现的镜头数
+     * 本章节内出现的镜头数；0 表示本集尚未用到（可能沿用自其它集）
      */
     shot_count: number;
+    /**
+     * 本章节内出现的镜头 ID
+     */
+    shot_ids: Array<string>;
 };
 

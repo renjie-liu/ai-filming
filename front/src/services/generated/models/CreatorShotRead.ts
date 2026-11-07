@@ -21,6 +21,14 @@ export type CreatorShotRead = {
      */
     duration: number;
     /**
+     * 景别 code（ECU / CU / MCU / MS / MLS / LS / ELS）
+     */
+    camera_shot: string;
+    /**
+     * 运镜 code（STATIC / PAN / DOLLY_IN …）
+     */
+    movement: string;
+    /**
      * 画面描述（首帧提示词；AI 生成后可编辑）
      */
     description: string;
