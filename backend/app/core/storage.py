@@ -8,17 +8,42 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, BinaryIO
 
-import os
-
-from anyio import to_thread
 import boto3
+from anyio import to_thread
 from botocore.client import Config as BotoConfig
 from botocore.exceptions import ClientError
 
 from app.config import settings
+
+
+class StorageUnavailableError(RuntimeError):
+    """对象存储暂时不可用（Vercel Blob 超出额度被暂停、凭证失效、限流等）。
+
+    为什么存在：这类错误不是用户输入问题，也不是代码缺陷；上传接口把它转成 503 并给出可读原因，
+    生成任务则把它写进 task.error，前端统一映射成「存储已暂停」提示，而不是笼统的 500。
+    """
+
+
+# vercel.blob 里表示「整个存储不可用」的异常类名（按名字匹配，避免在 S3 模式下导入 Blob SDK）
+_BLOB_UNAVAILABLE_ERROR_NAMES = {
+    "BlobStoreSuspendedError",
+    "BlobStoreNotFoundError",
+    "BlobServiceRateLimited",
+    "BlobAccessError",
+    "BlobCredentialsError",
+}
+
+
+def _wrap_blob_error(exc: BaseException, operation: str) -> BaseException:
+    """把 Blob SDK 的「存储不可用」异常包成 StorageUnavailableError；其它异常原样返回。"""
+    name = type(exc).__name__
+    if name in _BLOB_UNAVAILABLE_ERROR_NAMES:
+        return StorageUnavailableError(f"Blob storage unavailable during {operation}: {name}: {exc}")
+    return exc
 
 
 @dataclass
@@ -315,13 +340,16 @@ async def _blob_upload(*, key: str, data: bytes | BinaryIO, content_type: str | 
     vercel_blob = _blob_module()
     pathname = _normalize_key(key)
     body = bytes(data) if isinstance(data, (bytes, bytearray, memoryview)) else data.read()
-    result = await vercel_blob.put_blob(
-        pathname,
-        body,
-        access=_blob_access(),  # type: ignore[arg-type]
-        content_type=content_type,
-        allow_overwrite=True,
-    )
+    try:
+        result = await vercel_blob.put_blob(
+            pathname,
+            body,
+            access=_blob_access(),  # type: ignore[arg-type]
+            content_type=content_type,
+            allow_overwrite=True,
+        )
+    except Exception as exc:
+        raise _wrap_blob_error(exc, "upload") from exc
     return StoredFileInfo(key=pathname, url=result.url, size=len(body), content_type=content_type, etag=result.etag)
 
 

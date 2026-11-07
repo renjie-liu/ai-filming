@@ -151,12 +151,16 @@ async def upload_file(
     # 每次上传使用独立目录：同名文件不再互相覆盖 / 误删，也避免对象存储 CDN 对同一路径的旧缓存（含删除后的 404）。
     # 下载文件名取 storage_key 的最后一段，仍为原始文件名。
     key = f"files/{uuid.uuid4().hex}/{file.filename}"
-    info = await storage.upload_file(
-        key=key,
-        data=content,
-        content_type=file.content_type,
-        extra_args={"ACL": "public-read"},
-    )
+    try:
+        info = await storage.upload_file(
+            key=key,
+            data=content,
+            content_type=file.content_type,
+            extra_args={"ACL": "public-read"},
+        )
+    except storage.StorageUnavailableError as exc:
+        # 存储被暂停 / 凭证失效：不是用户的问题，给 503 和可读原因（前端映射为「存储已暂停」）
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     file_item = await create_and_refresh(
         db,

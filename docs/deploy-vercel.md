@@ -107,3 +107,26 @@ run it and written its result to the database.
 - Preview deployments are protected by Vercel Authentication by default. Production
   deployments on the Hobby plan are public, so anyone with the URL can spend your
   Ark credits.
+
+## Troubleshooting: Blob store suspended (`limits-exceeded-suspended`)
+
+Symptom: uploads return 503 and every image / video task fails with
+`Blob storage unavailable … BlobStoreSuspendedError`; the creator page shows
+「素材存储（Vercel Blob）已超出免费额度被暂停」. The store itself reports
+`status: limits-exceeded-suspended` / `usageQuotaExceeded: true`
+(Vercel dashboard → Storage → the Blob store, or `GET /api/v1/_deploy/status`
+plus the Vercel API).
+
+Cause: the Hobby plan's included Blob usage for the month was used up (generated
+videos are 4–9 MB each and every board refresh loads thumbnails).
+
+Fixes, pick one:
+
+1. Upgrade the Vercel team to Pro (the store resumes automatically).
+2. Wait for the monthly usage reset.
+3. Point the backend at any S3-compatible bucket instead of Blob: set
+   `S3_ENDPOINT_URL`, `S3_REGION_NAME`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`,
+   `S3_BUCKET_NAME` (and `S3_PUBLIC_BASE_URL` for a public CDN host) in the
+   project environment and redeploy; `storage_backend` in `/_deploy/status`
+   switches to `s3`. Cloudflare R2's free tier (10 GB) is enough for hobby use.
+   Files already stored in Blob stay readable through their public URLs.
