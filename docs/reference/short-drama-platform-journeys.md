@@ -33,8 +33,65 @@
 | 后期 | 配音 / 字幕 / BGM / 时间线 / 导出 | 连播 + 逐段下载 | 合成导出、TTS 配音、字幕列入 P3 |
 | 捷径 | 一句话出整集 | 无 | 列入 P3（后端任务链已具备） |
 
+## 第二轮细看：Higgsfield、LibTV、即梦（Seedance 自家）与 Seedance 2.x API（2026-11-07）
+
+### Higgsfield（Popcorn 故事板 + Cinema Studio + Soul ID）
+
+- **先拍故事板，再花钱生视频**：官方指南把流程定为「拆场 → 拆视觉节拍 → 每个节拍定景别 / 机位 / 运镜 / 目的 → 每个节拍出一张参考帧 → 锁定后进 Cinema Studio 生视频」，理由是「故事板阶段是整条流水线里犯错最便宜的地方」。
+- **Shot list 是一张表**：列为 场次 / 镜号 / 景别 / 运镜 / 参考（角色 / 场景 / 服装 / 道具）/ 备注（意图 + 连续性要求，如「脸和外套与 1A 一致」）。
+- **Popcorn 一次生成一组连贯帧**：最多 8 帧按「一个序列」生成（而非逐帧），角色、光线、空间关系在帧之间保持；每次最多 4 张参考（角色肖像 + 场景 + 服装 + 道具）；有手动 / 自动两种模式；跨组生成时「把已确认的最佳帧当参考」以减少漂移。
+- **相机参数化**：Cinema Studio 用可选的运镜预设（crash zoom / dolly / crane / FPV / bullet time 等，可叠加）代替用文字描述相机；Soul ID 用 20+ 张照片训练角色身份；Lipsync Studio 做对口型。
+- **提示词公式**：景别 + 运镜 + 主体 + 动作 + 场景 + 光线风格 + 参考。
+
+### LibTV（哩布）
+
+- **无限画布 + 五种节点**（文本 / 图片 / 视频 / 音频 / 脚本），上游输出即下游输入；每次生成**派生新节点而不覆盖原图**（非破坏性，可回退）。
+- **图片节点自带相机控制**（相机类型、镜头、焦距、光圈）和一整套编辑（一键高清、扩图、局部重绘、擦除、抠图、多角度生成、打光调节），还有「标记」把多张图里的元素融合。
+- **「/」隐藏工具**：多机位九宫格、剧情推演四宫格、25 宫格连贯分镜、电影级光影校正、角色三视图、画面推演（3 秒后 / 5 秒前）。宫格是一整张图，可切成独立帧再喂给视频节点当参考——用一次图片生成的钱先验证整段节奏。
+- **视频在站内裁剪**、自动配乐 + 剪辑成片；顶级模型（可灵 / Seedance 等）自由选；Agent 通过 Skill「一句话出片」。
+
+### 即梦短剧工作室（Seedance 自家产品）
+
+- **三种入口**：一句话原创 / IP 改编 / 上传已有剧本。原创走 DreamScript：选国内 / 出海、集数（10–100）、受众、人设标签、画面风格 → 给 3 个故事方向 → 完整故事设定、分集大纲、完整剧本；「剧本医生」做诊断。
+- **资产化**：剧本解析出角色、场景与出场关系，先生成「角色设定 + 生成提示词」让人确认，再由面向短剧美术调校的 Anycook 模型出图；同一角色可有多种形态资产并标注出现集数；资产跨集 / 续集沿用；镜头提示词里用引用标记绑定资产形象。
+- **3D 导演台 + 智能预演**：在三维空间摆站位、道具、机位和运动轨迹，白模预演不消耗视频算力，预演结果作为「动态参考」进视频节点再换成正式人物服装。
+- **片段重拍 + 超分**：只重拍不满意的几秒，不整集重跑。
+
+### Seedance 2.x API 能力（ModelArk，我们现在用的就是它）
+
+| 能力 | 2.0 | 2.5 | Jellyfish 现状 |
+| --- | --- | --- | --- |
+| 全能参考（omni-reference） | 图 ≤9、视频 ≤3（仅 URL，合计 ≤15 s）、音频 ≤3（需配图 / 视频） | 图 ≤30、视频 / 音频 ≤10，合计 ≤30 s，支持纯音频驱动 | 只用 1 张首帧（`first`）或纯文字；角色 / 场景形象图没有进视频模型 |
+| 引用语法 | 提示词里写 `[Image 1] …; [Video 1] 运镜; [Audio 1] 配乐`，按媒体类型各自从 1 编号 | 同 | 无 |
+| 多镜头 | 时间码分段：`[0-4s]: 远景建立; [4-8s]: 推近` | 同，时长 4–30 s | 一镜一段文字；`ShotDetail.action_beats` 已有数据但没用到 |
+| 模式互斥 | 首帧 / 首尾帧 与 全能参考不能混用 | 同 | — |
+| 体积 | 请求体 ≤64 MB，大文件建议传 URL 而非 base64 | 同 | 现在全部 base64 内联；参考图一多就会超 |
+| 真人人脸 | 普通上传含真人脸会被拒，需走人像资产通道 | 同 | 已映射为中文提示并自动改纯文字 |
+
+### 可借鉴清单（按性价比排序）
+
+| # | 借鉴点 | 来源 | 对 Jellyfish 的改动 | 预估 |
+| --- | --- | --- | --- | --- |
+| 1 | **全能参考生视频**：把镜头关联的角色形象图、场景参考图（+ 可选关键帧）作为 `reference_image` 一起喂给 Seedance，提示词用 `[Image n]` 点名「谁是谁」 | Seedance API、即梦资产引用、Higgsfield 4 参考 | 新增 `reference` 参考模式：契约加 `reference_images`、payload 走 URL 而非 base64、视频提示词模板生成 `[Image n]` 映射；确认单显示「形象参考 N 张」 | 1 天 |
+| 2 | **时间码分镜段落**：一个镜头多个动作节拍时，提示词写成 `[0-3s] … [3-6s] …` | Seedance 多镜头、Higgsfield 节拍表 | 用已有 `action_beats` 自动分配时间段写进视频提示词；分镜抽屉可编辑节拍 | 0.5 天 |
+| 3 | **视频提示词可见可改 + 上传自己的视频片段** | LibTV 节点可上传、即梦片段重拍 | 视频步骤每镜「查看 / 编辑提示词」「上传视频」 | 0.5 天 |
+| 4 | **多候选选一张 + 非破坏性历史**：关键帧 / 形象图一次出 2–4 张，选一张采用；旧版本可回退 | LibTV 派生节点、Higgsfield variants | 图片任务返回多张；`ShotFrameImage` 增加候选表或用任务结果保存历史；卡片上「换一张 / 回退」 | 1–2 天 |
+| 5 | **相机参数化预设**：运镜预设库（推 / 拉 / 摇 / 跟 / 环绕 / 手持…）+ 镜头焦段，写成固定句式进提示词 | Higgsfield Cinema Studio、LibTV 相机控制 | 分镜抽屉的景别 / 运镜扩成「预设 + 焦段」，提示词模板按公式拼 | 0.5 天 |
+| 6 | **角色多视图**：从主形象派生正 / 侧 / 背三视图，作为 2–3 张参考一起进视频 | LibTV 三视图、即梦多形态资产 | 形象图行已有 `view_angle`；加「生成三视图」任务（Seedream 多图编辑） | 1 天 |
+| 7 | **一句话 → 剧本**：题材 / 受众 / 集数标签 → 3 个故事方向 → 分集大纲 → 剧本；「剧本医生」 | 即梦 DreamScript | 剧本步骤新增「帮我写」：文本模型三段式生成 + 检查清单 | 1–2 天 |
+| 8 | **低成本预演**：生视频前先出一张「剧情推演四宫格」看节奏 | LibTV 四宫格、即梦白模预演 | 分镜卡「预演」= 一张 2×2 网格图任务（一次图片费用）；满意再生视频 | 1 天 |
+| 9 | **配音 / 配乐参考**：上传音频作为 `[Audio 1]` 驱动（2.5 支持纯音频） | Seedance 音频参考 | 镜头抽屉「配音 / 配乐」上传 → `reference_audio` | 0.5 天（依赖 #1） |
+| 10 | **合成导出**：按顺序拼接 + 字幕（对白行）+ BGM | 所有平台 | 浏览器端 ffmpeg.wasm | 2 天 |
+| 11 | **Agent 一键出整集**：一句话 → 全链路自动跑完再让人改 | LibTV Skill、即梦小云雀 | 后端编排任务 + 进度页；现有任务链已具备 | 2 天 |
+
+不借鉴：无限画布 / 节点编辑器、3D 导演台（学习成本高，短剧主流程用线性五步 + 表格更直接）。
+
 ## 来源
 
+- Higgsfield：[How to Turn a Script into an AI Storyboard and Shot List](https://higgsfield.ai/blog/script-to-ai-storyboard-shot-list)、[Meet Higgsfield Popcorn](https://higgsfield.ai/blog/The-AI-Storyboard-Generator-That-Feels-Like-Directing)、[Best AI video platform for consistent characters](https://higgsfield.ai/blog/best-ai-video-consistent-characters)、[Cinema Studio / Soul ID masterclass](https://www.frankx.ai/guides/higgsfield-ai-video-guide)、[Higgsfield review: camera controls tested](https://dynalord.com/blog/higgsfield-review)、[Popcorn review](https://www.composite.global/news/higgsfield-popcorn-vs-nano-banana)
+- LibTV 第二轮：[量子位：LibTV 解锁全自动拍片](https://www.qbitai.com/2026/03/390320.html)、[Liblib 发布 LibTV 深度实测](https://view.inews.qq.com/a/20260319A05XAY00)、[LibTV 无限画布保姆级教程](https://x.com/YangGuangAI/article/2034973086769139721)、[LibTV 节点式工作流落地教程](https://blog.csdn.net/Harrytutu_ZuiYue/article/details/162815335)
+- 即梦短剧工作室：[爱范儿：实测即梦短剧工作室](https://www.ifanr.com/1686343)、[即梦短剧工作室保姆级教程](https://www.sohu.com/a/1097007160_121124358)
+- Seedance 2.x API：[Seedance 2.0 reference guide: images, video and audio](https://magichour.ai/blog/seedance-20-reference-guide)、[seedance-cli README（参考输入上限与 `[Image 1]` / 时间码语法）](https://github.com/paperfoot/seedance-cli)、[Seedance 2.0 API guide](https://www.datacamp.com/tutorial/seedance-2-0-api-guide)
 - LibTV：[AI短剧工业化：从7天到4小时](https://www.sohu.com/a/1054148101_122920010)、[LibTV 详解：无限画布、节点工作流与双入口](https://zhuanlan.zhihu.com/p/2074658392195479098)、[LibTV：从剧本到成片一步搞定](https://zhuanlan.zhihu.com/p/2036940221040824458)、[实测 LibTV](https://zhuanlan.zhihu.com/p/2017944626061919460)、[AI 视频平台推荐与流程指南](https://www.sohu.com/a/1082603714_121899512)
 - 即梦短剧工作室：[即梦上新，已装下 AI 创作者的整个工作台](https://www.163.com/dy/article/LB0FJO5D0556CUWO.html)、[即梦上线短剧工作室、DreamScript](https://original.ifeng.com/c/8xo1c3Uuuxn)、[AI 短剧制作：从剧本分镜到视频创作](https://jimeng.jianying.com/tools/ai-short-drama)、[从剧本拆分镜到首尾帧控脸出片](https://blog.csdn.net/weixin_31062533/article/details/168760521)
 - LTX Studio：[LTX Studio Review 2026: Storyboard-First Workflow](https://lumalabs.ai/news/ltx-studio-review)、[LTX Studio for Producers](https://ltx.io/studio/solution/producers)、[Script to Video](https://ltx.io/studio/platform/script-to-video)、[End-to-End AI Video Production](https://freeaitool.com/en/image-tools/069-ltx-studio-ai-video-production-complete-guide/)
