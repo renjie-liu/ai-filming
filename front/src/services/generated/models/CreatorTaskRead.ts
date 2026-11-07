@@ -17,10 +17,10 @@ export type CreatorTaskRead = {
     /**
      * 进度 0-100
      */
-    progress?: number;
+    progress: number;
     /**
      * 失败原因（原文，前端负责中文映射）
      */
-    error?: (string | null);
+    error: (string | null);
 };
 

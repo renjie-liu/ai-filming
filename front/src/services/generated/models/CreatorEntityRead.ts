@@ -10,22 +10,26 @@ export type CreatorEntityRead = {
     type: 'character' | 'scene' | 'prop' | 'costume';
     id: string;
     name: string;
-    description?: string;
+    description: string;
     /**
      * 形象 / 参考图地址；无图为空
      */
-    thumbnail?: string;
+    thumbnail: string;
     /**
      * 形象图行 ID（创建图片任务时使用）
      */
-    image_id?: (number | null);
+    image_id: (number | null);
+    /**
+     * 形象图文件 ID（作为关键帧 / 视频的参考图）
+     */
+    image_file_id: (string | null);
     /**
      * 最近一次形象图任务
      */
-    image_task?: (CreatorTaskRead | null);
+    image_task: (CreatorTaskRead | null);
     /**
      * 本章节内出现的镜头数
      */
-    shot_count?: number;
+    shot_count: number;
 };
 

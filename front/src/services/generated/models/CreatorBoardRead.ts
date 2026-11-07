@@ -14,16 +14,16 @@ import type { CreatorTaskRead } from './CreatorTaskRead';
 export type CreatorBoardRead = {
     project: CreatorProjectRead;
     chapter: CreatorChapterRead;
-    shots?: Array<CreatorShotRead>;
-    entities?: Array<CreatorEntityRead>;
+    shots: Array<CreatorShotRead>;
+    entities: Array<CreatorEntityRead>;
     summary: CreatorSummaryRead;
     /**
      * 最近一次拆分镜任务
      */
-    divide_task?: (CreatorTaskRead | null);
+    divide_task: (CreatorTaskRead | null);
     /**
      * 最近一次角色场景提取任务
      */
-    extract_task?: (CreatorTaskRead | null);
+    extract_task: (CreatorTaskRead | null);
 };
 

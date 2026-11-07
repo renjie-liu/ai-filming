@@ -9,7 +9,7 @@ export type CreatorDialogueLineRead = {
     /**
      * 说话角色名；旁白为空
      */
-    speaker?: string;
+    speaker: string;
     /**
      * 台词
      */

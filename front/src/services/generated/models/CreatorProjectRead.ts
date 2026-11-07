@@ -7,6 +7,6 @@ export type CreatorProjectRead = {
     name: string;
     style: string;
     visual_style: string;
-    default_video_ratio?: (string | null);
+    default_video_ratio: (string | null);
 };
 

@@ -6,7 +6,7 @@ export type CreatorChapterRead = {
     id: string;
     index: number;
     title: string;
-    raw_text?: string;
+    raw_text: string;
     status: string;
 };
 

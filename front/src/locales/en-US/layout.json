@@ -4,7 +4,9 @@
   "welcome": "Welcome to Jellyfish",
   "menu": {
     "settings": "Settings",
-    "guide": "Guide"
+    "guide": "Guide",
+    "works": "Works",
+    "models": "Models"
   },
   "user": {
     "profile": "Profile",

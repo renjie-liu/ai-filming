@@ -2,8 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { NavigateFunction } from 'react-router-dom'
 import { StudioChaptersService, StudioShotsService } from '../../../services/generated'
 import { StudioEntitiesApi } from '../../../services/studioEntities'
-import { getChapterShotsPath, getChapterStudioPath } from '../project/ProjectWorkbench/routes'
+import { getCreatorPath } from '../../creator/routes'
 import type { TaskUiItem } from './taskUiStore'
+
+/**
+ * 任务中心条目的来源标签与跳转目标。
+ *
+ * 为什么存在：任务只记录关联实体（章节 / 镜头 / 实体），任务中心需要把它翻译成
+ * 「章节：第 1 集」这样的人话，并跳到创作页对应的集。
+ */
 
 type ResolvedTaskMeta = {
   sourceLabel?: string | null
@@ -18,26 +25,9 @@ const CHAPTER_RELATION_TYPES = new Set([
   'script_simplification',
 ])
 
-const ASSET_EDIT_PATH_BUILDERS: Record<string, (id: string) => string> = {
-  actor_image: (id) => `/assets/actors/${id}/edit`,
-  scene_image: (id) => `/assets/scenes/${id}/edit`,
-  prop_image: (id) => `/assets/props/${id}/edit`,
-  costume_image: (id) => `/assets/costumes/${id}/edit`,
-}
+const SHOT_RELATION_TYPES = new Set(['video', 'shot_first_frame_prompt', 'shot_last_frame_prompt', 'shot_key_frame_prompt'])
 
-const ASSET_ENTITY_TYPES: Record<string, 'actor' | 'scene' | 'prop' | 'costume'> = {
-  actor_image: 'actor',
-  scene_image: 'scene',
-  prop_image: 'prop',
-  costume_image: 'costume',
-}
-
-const SHOT_RELATION_TYPES = new Set([
-  'video',
-  'shot_first_frame_prompt',
-  'shot_last_frame_prompt',
-  'shot_key_frame_prompt',
-])
+const ENTITY_LABELS: Record<string, string> = { actor: '演员', scene: '场景', prop: '道具', costume: '服装', character: '角色' }
 
 function metaKeyForTask(task: TaskUiItem): string | null {
   if (task.navigateRelationType && task.navigateRelationEntityId) {
@@ -52,159 +42,76 @@ function metaKeyForTask(task: TaskUiItem): string | null {
 async function resolveTaskMeta(task: TaskUiItem): Promise<ResolvedTaskMeta | null> {
   const relationType = task.navigateRelationType ?? task.relationType
   const relationEntityId = task.navigateRelationEntityId ?? task.relationEntityId
+  if (!relationType || !relationEntityId) return null
 
-  if (relationType && relationEntityId && CHAPTER_RELATION_TYPES.has(relationType)) {
-    const res = await StudioChaptersService.getChapterApiV1StudioChaptersChapterIdGet({
-      chapterId: relationEntityId,
-    })
+  if (CHAPTER_RELATION_TYPES.has(relationType)) {
+    const res = await StudioChaptersService.getChapterApiV1StudioChaptersChapterIdGet({ chapterId: relationEntityId })
     const chapter = res.data
     if (!chapter) return null
-    return {
-      sourceLabel: chapter.title ? `章节：${chapter.title}` : `章节：${relationEntityId}`,
-      navigateTo: getChapterShotsPath(chapter.project_id, chapter.id),
-    }
+    return { sourceLabel: `章节：${chapter.title || relationEntityId}`, navigateTo: getCreatorPath(chapter.project_id, chapter.id) }
   }
 
-  if (relationType && relationEntityId && (SHOT_RELATION_TYPES.has(relationType) || relationType === 'shot')) {
-    const shotRes = await StudioShotsService.getShotApiV1StudioShotsShotIdGet({
-      shotId: relationEntityId,
-    })
+  if (SHOT_RELATION_TYPES.has(relationType) || relationType === 'shot') {
+    const shotRes = await StudioShotsService.getShotApiV1StudioShotsShotIdGet({ shotId: relationEntityId })
     const shot = shotRes.data
     if (!shot) return null
-    const chapterRes = await StudioChaptersService.getChapterApiV1StudioChaptersChapterIdGet({
-      chapterId: shot.chapter_id,
-    })
+    const chapterRes = await StudioChaptersService.getChapterApiV1StudioChaptersChapterIdGet({ chapterId: shot.chapter_id })
     const chapter = chapterRes.data
-    if (!chapter) {
-      return {
-        sourceLabel: shot.title ? `镜头：${shot.title}` : `镜头：${relationEntityId}`,
-        navigateTo: null,
-      }
-    }
-    return {
-      sourceLabel: shot.title
-        ? `镜头：${shot.title}（第 ${shot.index} 镜）`
-        : `镜头：${relationEntityId}`,
-      navigateTo: getChapterStudioPath(chapter.project_id, chapter.id),
-    }
+    const label = shot.title ? `镜头：${shot.title}（第 ${shot.index} 镜）` : `镜头：${relationEntityId}`
+    const step = relationType === 'video' ? 'video' : 'storyboard'
+    return { sourceLabel: label, navigateTo: chapter ? getCreatorPath(chapter.project_id, chapter.id, step) : null }
   }
 
-  if (relationType && relationEntityId && ['actor', 'scene', 'prop', 'costume', 'character'].includes(relationType)) {
+  if (relationType in ENTITY_LABELS) {
     const entityType = relationType as 'actor' | 'scene' | 'prop' | 'costume' | 'character'
     try {
       const res = await StudioEntitiesApi.get(entityType, relationEntityId)
       const data = res.data as Record<string, unknown> | null
       const name = typeof data?.name === 'string' ? data.name.trim() : ''
       const projectId = typeof data?.project_id === 'string' ? data.project_id.trim() : ''
-      const labelPrefix =
-        entityType === 'actor'
-          ? '演员'
-          : entityType === 'scene'
-            ? '场景'
-            : entityType === 'prop'
-              ? '道具'
-              : entityType === 'costume'
-                ? '服装'
-                : '角色'
-      const navigateTo =
-        entityType === 'character'
-          ? projectId
-            ? `/projects/${projectId}/roles/${relationEntityId}/edit`
-            : null
-          : entityType === 'actor'
-            ? `/assets/actors/${relationEntityId}/edit`
-            : entityType === 'scene'
-              ? `/assets/scenes/${relationEntityId}/edit`
-              : entityType === 'prop'
-                ? `/assets/props/${relationEntityId}/edit`
-                : `/assets/costumes/${relationEntityId}/edit`
       return {
-        sourceLabel: name ? `${labelPrefix}：${name}` : `${labelPrefix}：${relationEntityId}`,
-        navigateTo,
+        sourceLabel: `${ENTITY_LABELS[entityType]}：${name || relationEntityId}`,
+        navigateTo: projectId ? getCreatorPath(projectId, null, 'cast') : null,
       }
     } catch {
-      const navigateTo =
-        entityType === 'character'
-          ? null
-          : entityType === 'actor'
-            ? `/assets/actors/${relationEntityId}/edit`
-            : entityType === 'scene'
-              ? `/assets/scenes/${relationEntityId}/edit`
-              : entityType === 'prop'
-                ? `/assets/props/${relationEntityId}/edit`
-                : `/assets/costumes/${relationEntityId}/edit`
-      return {
-        sourceLabel: `${relationType}：${relationEntityId}`,
-        navigateTo,
-      }
+      return { sourceLabel: `${ENTITY_LABELS[entityType]}：${relationEntityId}`, navigateTo: null }
     }
   }
 
-  if (relationEntityId?.includes(':')) {
+  // 形象图任务：relation_entity_id 为 "<type>_image:<id>" 形式时只给出标签
+  if (relationEntityId.includes(':')) {
     const [assetRelationType, assetId] = relationEntityId.split(':', 2)
-    const entityType = ASSET_ENTITY_TYPES[assetRelationType]
-    const buildPath = ASSET_EDIT_PATH_BUILDERS[assetRelationType]
-    if (!entityType || !buildPath || !assetId) return null
-
-    try {
-      const res = await StudioEntitiesApi.get(entityType, assetId)
-      const data = res.data as Record<string, unknown> | null
-      const name = typeof data?.name === 'string' ? data.name.trim() : ''
-      const labelPrefix =
-        entityType === 'actor'
-          ? '演员'
-          : entityType === 'scene'
-            ? '场景'
-            : entityType === 'prop'
-              ? '道具'
-              : '服装'
-      return {
-        sourceLabel: name ? `${labelPrefix}：${name}` : `${labelPrefix}：${assetId}`,
-        navigateTo: buildPath(assetId),
-      }
-    } catch {
-      return {
-        sourceLabel: `${assetRelationType}：${assetId}`,
-        navigateTo: buildPath(assetId),
-      }
-    }
+    const entityType = assetRelationType.replace(/_image$/, '')
+    const label = ENTITY_LABELS[entityType]
+    if (!label || !assetId) return null
+    return { sourceLabel: `${label}形象：${assetId}`, navigateTo: null }
   }
 
   return null
 }
 
-export function useResolvedTaskCenterTasks(
-  tasks: TaskUiItem[],
-  navigate: NavigateFunction,
-): TaskUiItem[] {
+export function useResolvedTaskCenterTasks(tasks: TaskUiItem[], navigate: NavigateFunction): TaskUiItem[] {
   const [metaMap, setMetaMap] = useState<Record<string, ResolvedTaskMeta>>({})
   const loadingKeysRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     let cancelled = false
-
     tasks.forEach((task) => {
       const effectiveRelationType = task.navigateRelationType ?? task.relationType
       const effectiveRelationEntityId = task.navigateRelationEntityId ?? task.relationEntityId
-      if ((task.sourceLabel && task.onNavigate) || !effectiveRelationType || !effectiveRelationEntityId) {
-        return
-      }
+      if ((task.sourceLabel && task.onNavigate) || !effectiveRelationType || !effectiveRelationEntityId) return
       const key = metaKeyForTask(task)
       if (!key || metaMap[key] || loadingKeysRef.current.has(key)) return
       loadingKeysRef.current.add(key)
       void resolveTaskMeta(task)
         .then((meta) => {
           if (cancelled || !meta) return
-          setMetaMap((current) => ({
-            ...current,
-            [key]: meta,
-          }))
+          setMetaMap((current) => ({ ...current, [key]: meta }))
         })
         .finally(() => {
           loadingKeysRef.current.delete(key)
         })
     })
-
     return () => {
       cancelled = true
     }
@@ -218,13 +125,7 @@ export function useResolvedTaskCenterTasks(
         return {
           ...task,
           sourceLabel: task.sourceLabel ?? meta?.sourceLabel ?? null,
-          onNavigate:
-            task.onNavigate ??
-            (meta?.navigateTo
-              ? () => {
-                  navigate(meta.navigateTo!)
-                }
-              : null),
+          onNavigate: task.onNavigate ?? (meta?.navigateTo ? () => navigate(meta.navigateTo!) : null),
         }
       }),
     [metaMap, navigate, tasks],

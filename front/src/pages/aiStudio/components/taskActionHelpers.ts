@@ -2,7 +2,7 @@ import { message } from 'antd'
 import { toChineseErrorMessage } from '../../../utils/errorMessage'
 import { FilmService } from '../../../services/generated'
 import type { TaskStatus } from '../../../services/generated'
-import type { RelationTaskState } from '../project/ProjectWorkbench/chapterDivisionTasks'
+import type { RelationTaskState } from '../../creator/relationTasks'
 
 type AsyncTaskCreateLike = {
   task_id: string

@@ -1,15 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import type React from 'react';
+import { useEffect, useMemo, useState } from 'react'
 import { Layout, Menu, theme, Dropdown, Space, Avatar, Select, Breadcrumb, Drawer } from 'antd'
 import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   SettingOutlined,
   UserOutlined,
-  FolderOutlined,
-  PictureOutlined,
-  FileTextOutlined,
+  VideoCameraOutlined,
   ApiOutlined,
-  CompassOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
@@ -49,13 +47,8 @@ const MainLayout: React.FC = () => {
   }, [i18n.resolvedLanguage])
 
   const selectedKeys = useMemo(() => {
-    if (location.pathname === '/projects' || location.pathname.startsWith('/projects/')) return ['projects']
-    if (location.pathname.startsWith('/assets')) return ['assets']
-    if (location.pathname.startsWith('/prompts')) return ['prompts']
-    if (location.pathname.startsWith('/files')) return ['files']
-    if (location.pathname.startsWith('/agents')) return ['agents']
+    if (location.pathname === '/works' || location.pathname.startsWith('/works/')) return ['works']
     if (location.pathname.startsWith('/models')) return ['models']
-    if (location.pathname.startsWith('/guide')) return ['guide']
     if (location.pathname.startsWith('/settings')) return ['settings']
     return []
   }, [location.pathname])
@@ -63,87 +56,31 @@ const MainLayout: React.FC = () => {
   const breadcrumbItems = useMemo(() => {
     const path = location.pathname.replace(/^\/+/, '').split('/').filter(Boolean)
     if (path.length === 0) return [{ title: t('title') }]
-    const items: { title: React.ReactNode; key: string }[] = []
-    const pathLabels: Record<string, string> = {
-      projects: '项目列表',
-      assets: '资产管理',
-      prompts: '提示词模板',
-      files: '文件管理',
-      agents: 'Agent管理',
-      models: '模型管理',
-      guide: t('menu.guide'),
+    const labels: Record<string, string> = {
+      works: t('menu.works'),
+      models: t('menu.models'),
       settings: t('menu.settings'),
-      chapters: '章节管理',
-      studio: '分镜工作室',
-      prep: '章节编辑',
-      shots: '分镜',
-      editor: '视频剪辑',
-      edit: '编辑',
     }
+    const items: { title: React.ReactNode; key: string }[] = []
     path.forEach((segment, i) => {
-      // 特殊：/projects/:projectId/chapters/:chapterId/* 中的 chapterId 段不展示（避免出现“章节”这一层）
-      if (path[0] === 'projects' && path[2] === 'chapters' && i === 3) {
-        return
-      }
-
-      // 默认：按原始路径逐段拼接
-      let href = path.slice(0, i + 1).join('/')
-      href = `/${href}`
-
-      // 特殊：章节相关的中间路径段在路由里不存在，需映射到有效地址
-      // /projects/:projectId/chapters/:chapterId/*
-      if (path[0] === 'projects' && path[2] === 'chapters') {
-        const projectId = path[1]
-        const chapterId = path[3]
-        if (segment === 'chapters' && i === 2) {
-          // “章节管理”实际在项目工作台页
-          href = `/projects/${projectId}?tab=chapters`
-        } else if (i === 3) {
-          // 章节 ID 段没有对应独立页面，跳到分镜页（存在路由）
-          href = `/projects/${projectId}/chapters/${chapterId}/shots`
-        }
-      }
-
+      const href = `/${path.slice(0, i + 1).join('/')}`
       const isLast = i === path.length - 1
-      let label = pathLabels[segment]
-      if (label === undefined) {
-        if (path[0] === 'projects' && i === 1) label = '项目工作台'
-        else if (path[2] === 'chapters' && i === 3) label = '章节'
-        else label = segment
-      }
-      items.push({
-        key: href,
-        title: isLast ? label : <Link to={href}>{label}</Link>,
-      })
+      const label = labels[segment] ?? (path[0] === 'works' && i === 1 ? '创作' : segment)
+      items.push({ key: href, title: isLast ? label : <Link to={href}>{label}</Link> })
     })
     return items
   }, [location.pathname, t])
 
   const menuItems = [
     {
-      key: 'projects',
-      icon: <FolderOutlined />,
-      label: <Link to="/projects">项目列表</Link>,
-    },
-    {
-      key: 'assets',
-      icon: <PictureOutlined />,
-      label: <Link to="/assets">资产管理</Link>,
-    },
-    {
-      key: 'prompts',
-      icon: <FileTextOutlined />,
-      label: <Link to="/prompts">提示词模板</Link>,
+      key: 'works',
+      icon: <VideoCameraOutlined />,
+      label: <Link to="/works">{t('menu.works')}</Link>,
     },
     {
       key: 'models',
       icon: <ApiOutlined />,
-      label: <Link to="/models">模型管理</Link>,
-    },
-    {
-      key: 'guide',
-      icon: <CompassOutlined />,
-      label: <Link to="/guide">{t('menu.guide')}</Link>,
+      label: <Link to="/models">{t('menu.models')}</Link>,
     },
     {
       key: 'settings',
@@ -174,7 +111,7 @@ const MainLayout: React.FC = () => {
   const renderNav = (showText: boolean) => (
     <>
       <div className="flex items-center h-16 px-4 border-b border-solid" style={{ borderColor: token.colorBorderSecondary }}>
-        <Link to="/projects" className="flex items-center gap-2 min-w-0">
+        <Link to="/works" className="flex items-center gap-2 min-w-0">
           <img src="/logo.svg" alt="Jellyfish" className="w-8 h-8 shrink-0" />
           {showText && (
             <div className="min-w-0">
@@ -264,7 +201,7 @@ const MainLayout: React.FC = () => {
               {isMobile || collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             </span>
             {isMobile && (
-              <Link to="/projects" className="flex items-center gap-1.5 min-w-0">
+              <Link to="/works" className="flex items-center gap-1.5 min-w-0">
                 <img src="/logo.svg" alt="Jellyfish" className="w-6 h-6 shrink-0" />
                 <span className="text-sm font-semibold text-gray-900 truncate">{t('title')}</span>
               </Link>

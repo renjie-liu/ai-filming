@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Button, Space, notification } from 'antd'
 import type { ReactNode } from 'react'
-import type { RelationTaskState } from '../project/ProjectWorkbench/chapterDivisionTasks'
+import type { RelationTaskState } from '../../creator/relationTasks'
 import { useTaskUiStore } from './taskUiStore'
 import { FilmService } from '../../../services/generated'
 import { localizeErrorMessage } from '../../../utils/errorMessage'

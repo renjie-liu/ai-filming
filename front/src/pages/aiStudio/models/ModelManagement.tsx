@@ -3,8 +3,8 @@ import { Layout, Tabs } from 'antd'
 import ProvidersTab from './ProvidersTab'
 import ModelsTab from './ModelsTab'
 import SettingsTab from './SettingsTab'
-import SetupStatusBanner from '../guide/SetupStatusBanner'
-import { useSetupStatus } from '../guide/useSetupStatus'
+import SetupStatusBanner from './SetupStatusBanner'
+import { useSetupStatus } from './useSetupStatus'
 
 export default function ModelManagement() {
   const [activeTab, setActiveTab] = useState<string>('providers')

@@ -348,6 +348,7 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
                 description=ch.description or "",
                 thumbnail="",
                 image_id=best.id if best is not None else None,
+                image_file_id=best.file_id if best is not None else None,
                 image_task=task,
                 shot_count=shot_count_by_entity.get(ch.id, 0),
             )
@@ -375,6 +376,7 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
                     description=row.description or "",
                     thumbnail="",
                     image_id=best.id if best is not None else None,
+                    image_file_id=best.file_id if best is not None else None,
                     image_task=tasks.get(str(best.id)) if best is not None else None,
                     shot_count=shot_count_by_entity.get(row.id, 0),
                 )

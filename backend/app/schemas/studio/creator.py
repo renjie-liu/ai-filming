@@ -8,10 +8,16 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class CreatorTaskRead(BaseModel):
+class _ReadModel(BaseModel):
+    """只读聚合模型基类：带默认值的字段在响应 schema 中仍标记为必填，前端 generated types 不再到处可选。"""
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+
+class CreatorTaskRead(_ReadModel):
     """某个资源最近一次生成任务的轻量状态（供卡片展示进度 / 失败原因）。"""
 
     task_id: str = Field(..., description="任务 ID")
@@ -20,14 +26,14 @@ class CreatorTaskRead(BaseModel):
     error: str | None = Field(None, description="失败原因（原文，前端负责中文映射）")
 
 
-class CreatorDialogueLineRead(BaseModel):
+class CreatorDialogueLineRead(_ReadModel):
     """镜头对白行（已确认）。"""
 
     speaker: str = Field("", description="说话角色名；旁白为空")
     text: str = Field(..., description="台词")
 
 
-class CreatorShotRead(BaseModel):
+class CreatorShotRead(_ReadModel):
     """创作页分镜卡所需的镜头信息。"""
 
     id: str
@@ -50,7 +56,7 @@ class CreatorShotRead(BaseModel):
     video_task: CreatorTaskRead | None = Field(None, description="最近一次视频任务")
 
 
-class CreatorEntityRead(BaseModel):
+class CreatorEntityRead(_ReadModel):
     """创作页角色 / 场景 / 道具 / 服装卡。"""
 
     type: Literal["character", "scene", "prop", "costume"]
@@ -59,11 +65,12 @@ class CreatorEntityRead(BaseModel):
     description: str = ""
     thumbnail: str = Field("", description="形象 / 参考图地址；无图为空")
     image_id: int | None = Field(None, description="形象图行 ID（创建图片任务时使用）")
+    image_file_id: str | None = Field(None, description="形象图文件 ID（作为关键帧 / 视频的参考图）")
     image_task: CreatorTaskRead | None = Field(None, description="最近一次形象图任务")
     shot_count: int = Field(0, description="本章节内出现的镜头数")
 
 
-class CreatorProjectRead(BaseModel):
+class CreatorProjectRead(_ReadModel):
     id: str
     name: str
     style: str
@@ -71,7 +78,7 @@ class CreatorProjectRead(BaseModel):
     default_video_ratio: str | None = None
 
 
-class CreatorChapterRead(BaseModel):
+class CreatorChapterRead(_ReadModel):
     id: str
     index: int
     title: str
@@ -79,7 +86,7 @@ class CreatorChapterRead(BaseModel):
     status: str
 
 
-class CreatorSummaryRead(BaseModel):
+class CreatorSummaryRead(_ReadModel):
     shot_count: int = 0
     ready_shot_count: int = Field(0, description="信息确认完成的镜头数")
     keyframe_count: int = 0
@@ -87,7 +94,7 @@ class CreatorSummaryRead(BaseModel):
     total_seconds: int = 0
 
 
-class CreatorBoardRead(BaseModel):
+class CreatorBoardRead(_ReadModel):
     """创作页聚合读模型。"""
 
     project: CreatorProjectRead
@@ -99,7 +106,7 @@ class CreatorBoardRead(BaseModel):
     extract_task: CreatorTaskRead | None = Field(None, description="最近一次角色场景提取任务")
 
 
-class AutoConfirmResultRead(BaseModel):
+class AutoConfirmResultRead(_ReadModel):
     """自动确认结果汇总。"""
 
     shot_count: int = 0
@@ -110,7 +117,7 @@ class AutoConfirmResultRead(BaseModel):
     ready_shots: int = Field(0, description="处理后处于 ready 的镜头数")
 
 
-class ProjectOverviewRead(BaseModel):
+class ProjectOverviewRead(_ReadModel):
     """作品列表卡片。"""
 
     id: str
