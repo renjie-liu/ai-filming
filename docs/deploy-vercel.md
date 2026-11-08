@@ -210,9 +210,12 @@ Fixes, pick one:
    keep other projects' Blob traffic in mind, the allowance is team-wide.
 3. Point the backend at Cloudflare R2 (or any S3-compatible bucket) instead of
    Blob, see [Object storage: Cloudflare R2](#object-storage-cloudflare-r2);
-   `storage.backend` in `/_deploy/status` switches to `s3`. This is the path this
-   fork is set up for. Files already stored in Blob keep their Blob URLs and become
-   readable again when the suspension lifts.
+   `storage.backend` in `/_deploy/status` switches to `s3`. The production
+   deployment was switched to R2 this way on 2026-11-08 (bucket `ai-filming-media`,
+   APAC; the R2 token has object permissions only, so `bootstrap.summary.storage.cors`
+   reports `error` and the CORS rule was written through the Cloudflare API instead).
+   Files already stored in Blob keep their Blob URLs and become readable again when
+   the suspension lifts.
 
 ## Troubleshooting: Neon quota exceeded (every API call returns 503)
 
