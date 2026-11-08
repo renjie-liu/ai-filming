@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import re
+
 import uuid
 from collections import defaultdict
 from typing import Any
@@ -291,7 +293,8 @@ def _task_note(result: object) -> str | None:
     dropped = result.get("dropped_references")
     if not isinstance(dropped, list) or not dropped:
         return None
-    labels = [str(item.get("label") or "").split("：", 1)[0].strip() for item in dropped if isinstance(item, dict)]
+    # 说明只留名称：去掉「：设定」和「（构图与起始状态）」这类补充，避免提示里括号套括号
+    labels = [re.split(r"[：（(]", str(item.get("label") or ""), 1)[0].strip() for item in dropped if isinstance(item, dict)]
     labels = [label for label in labels if label]
     kinds = {str(item.get("kind") or "") for item in dropped if isinstance(item, dict)}
     if not labels and kinds & {"first_frame", "last_frame", "key_frame"}:
