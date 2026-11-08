@@ -67,10 +67,10 @@ def test_drop_rejected_frame_falls_back_to_text_and_remaining_references() -> No
 class _FakeVideoTask:
     """前 N 次按脚本返回拒绝错误，之后成功；记录每次收到的参考图数量。"""
 
-    script: list[str] = []
-    seen_inputs: list[dict] = []
+    script: list[str] = []  # noqa: RUF012 - 测试脚本，按用例重置
+    seen_inputs: list[dict] = []  # noqa: RUF012
 
-    def __init__(self, *, provider_config, input_):  # noqa: ANN001
+    def __init__(self, *, provider_config, input_):
         self._input = input_
         self._result = None
         self._error = ""
@@ -79,11 +79,10 @@ class _FakeVideoTask:
         type(self).seen_inputs.append(self._input.model_dump())
         if type(self).script:
             self._error = type(self).script.pop(0)
-            return None
+            return
         from app.core.contracts.video_generation import VideoGenerationResult
 
         self._result = VideoGenerationResult(url="https://example.com/v.mp4", file_id=None, provider_task_id="cgt-1", provider="volcengine", status="succeeded")
-        return None
 
     async def get_result(self):
         return self._result
@@ -114,12 +113,12 @@ async def test_run_video_generation_task_retries_without_rejected_image(monkeypa
     class _File:
         id = "file-video-1"
 
-    async def _fake_persist(session, **kwargs):  # noqa: ANN001
+    async def _fake_persist(session, **kwargs):
         return _File()
 
     monkeypatch.setattr(gv, "persist_generated_video_to_shot", _fake_persist)
 
-    async def _noop_recompute(session, *, shot_id):  # noqa: ANN001
+    async def _noop_recompute(session, *, shot_id):
         return None
 
     monkeypatch.setattr(gv, "recompute_shot_status", _noop_recompute)
@@ -164,7 +163,7 @@ async def test_run_video_generation_task_fails_when_rejection_cannot_be_resolved
     monkeypatch.setattr(gv, "VideoGenerationTask", _FakeVideoTask)
     monkeypatch.setattr(gv, "async_session_maker", session_local)
 
-    async def _noop_recompute(session, *, shot_id):  # noqa: ANN001
+    async def _noop_recompute(session, *, shot_id):
         return None
 
     monkeypatch.setattr(gv, "recompute_shot_status", _noop_recompute)
