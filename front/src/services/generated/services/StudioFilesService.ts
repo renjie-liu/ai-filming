@@ -218,7 +218,7 @@ export class StudioFilesService {
         });
     }
     /**
-     * 直传准备：生成存储 key 与 pathname
+     * 直传准备：生成存储 key / pathname，S3 模式附预签名 PUT URL
      * @returns ApiResponse_DirectUploadPrepareRead_ Successful Response
      * @throws ApiError
      */

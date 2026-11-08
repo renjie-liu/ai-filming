@@ -100,13 +100,21 @@ async def build_deploy_status(*, probe_ark: bool = False, probe_model_availabili
                 by_region[region] = await probe_models(ARK_BASE_URLS[region], plan["api_key"], region=region, extra=extra)
             ark["model_availability_other_regions"] = by_region
 
+    # 存储：配置摘要 + 一次轻量只读探测（S3/R2 HeadBucket；Blob head 一个不存在的路径，能看出「已暂停」）
+    from app.services.studio.direct_upload import direct_upload_backend
+
+    storage_info = storage.describe_storage()
+    storage_info["direct_upload"] = direct_upload_backend()
+    storage_info.update(await storage.probe_storage())
+
     broker = settings.celery_broker_url or ""
     return {
         "vercel": is_vercel_runtime(),
         "task_execution_mode": settings.task_execution_mode,
         "bootstrap": bootstrap_state(),
         "database": db_info,
-        "storage_backend": storage.storage_backend(),
+        "storage_backend": storage_info["backend"],
+        "storage": storage_info,
         "celery_broker": broker.split("://", 1)[0] + "://" if "://" in broker else broker,
         "ark": ark,
     }

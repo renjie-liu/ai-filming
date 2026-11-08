@@ -51,7 +51,9 @@ def test_issue_client_token_only_for_prepared_paths(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
-async def test_register_uploaded_file_checks_url_and_creates_record() -> None:
+async def test_register_uploaded_file_checks_url_and_creates_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Blob 模式的登记校验（S3 / R2 模式见 test_storage_r2）
+    monkeypatch.setattr(storage, "storage_backend", lambda: "vercel_blob")
     db, engine = await _build_session()
     async with db:
         key, pathname = direct_upload.build_upload_key("clip.mp4")

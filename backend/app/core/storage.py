@@ -1,16 +1,23 @@
-"""统一的对象存储封装（目前以 S3 兼容为主）。
+"""统一的对象存储封装（S3 兼容协议为主，含 Cloudflare R2；也支持 Vercel Blob）。
 
 设计目标：
-- 提供上传 / 下载 / 列表 / 详情 等基础能力；
-- 尽量不绑定具体云厂商，只依赖 S3 兼容协议；
+- 提供上传 / 下载 / 列表 / 详情 / 浏览器直传预签名 等基础能力；
+- 尽量不绑定具体云厂商，只依赖 S3 兼容协议（AWS S3、Cloudflare R2、MinIO / RustFS 等）；
 - 在 FastAPI 异步环境下，避免阻塞事件循环：通过 anyio 在线程池中调用 boto3。
+
+Cloudflare R2 的差异（端点 `*.r2.cloudflarestorage.com` 时自动启用）：region 固定为 `auto`、
+path-style 寻址、不能带 LocationConstraint 建桶，并且不接受 boto3 ≥ 1.36 默认附加的 CRC 校验头
+（需要 `request_checksum_calculation=when_required`）。
 """
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, BinaryIO
+from urllib.parse import quote, urlparse
 
 import boto3
 from anyio import to_thread
@@ -18,6 +25,19 @@ from botocore.client import Config as BotoConfig
 from botocore.exceptions import ClientError
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+# 浏览器直传预签名 PUT 的有效期（秒）：足够覆盖大文件上传，又不会长期有效。
+PRESIGNED_PUT_EXPIRES_SECONDS = 3600
+# 浏览器直传与跨域读取（合成导出 fetch 片段）需要的 CORS 规则；写入桶时按此规则比对，已存在则不重复写。
+_CORS_RULE: dict[str, Any] = {
+    "AllowedOrigins": ["*"],
+    "AllowedMethods": ["GET", "HEAD", "PUT"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"],
+    "MaxAgeSeconds": 3600,
+}
 
 
 class StorageUnavailableError(RuntimeError):
@@ -86,17 +106,44 @@ def _ensure_blob_token_env() -> None:
         os.environ["BLOB_READ_WRITE_TOKEN"] = settings.blob_read_write_token
 
 
+def is_cloudflare_r2() -> bool:
+    """端点是否为 Cloudflare R2（`<account>.r2.cloudflarestorage.com`）；R2 需要几处与 AWS 不同的客户端参数。"""
+    host = (urlparse(settings.s3_endpoint_url or "").hostname or "").lower()
+    return host.endswith(".r2.cloudflarestorage.com") or host == "r2.cloudflarestorage.com"
+
+
+def _s3_region() -> str | None:
+    """签名用的 region：显式配置优先；R2 固定为 `auto`。"""
+    region = (settings.s3_region_name or "").strip()
+    if region:
+        return region
+    return "auto" if is_cloudflare_r2() else None
+
+
+def _s3_addressing_style() -> str:
+    """寻址方式：显式配置（`S3_ADDRESSING_STYLE=path|virtual|auto`）优先；R2 用 path，其它沿用 virtual。"""
+    style = (settings.s3_addressing_style or "").strip().lower()
+    if style in {"path", "virtual", "auto"}:
+        return style
+    return "path" if is_cloudflare_r2() else "virtual"
+
+
 def _build_s3_client():
+    """按配置构造 boto3 S3 客户端；R2 额外关闭默认 CRC 校验（R2 不接受 aws-chunked + x-amz-checksum-*）。"""
     if not settings.s3_bucket_name:
         raise RuntimeError("S3 未配置：请在配置中设置 s3_bucket_name 等必要字段")
 
+    config_kwargs: dict[str, Any] = {"s3": {"addressing_style": _s3_addressing_style()}, "signature_version": "s3v4"}
+    if is_cloudflare_r2():
+        config_kwargs["request_checksum_calculation"] = "when_required"
+        config_kwargs["response_checksum_validation"] = "when_required"
     client = boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint_url,
-        region_name=settings.s3_region_name,
+        region_name=_s3_region(),
         aws_access_key_id=settings.s3_access_key_id,
         aws_secret_access_key=settings.s3_secret_access_key,
-        config=BotoConfig(s3={"addressing_style": "virtual"}),
+        config=BotoConfig(**config_kwargs),
     )
     return client
 
@@ -110,7 +157,11 @@ def _normalize_key(key: str) -> str:
 
 
 def _build_public_url(key: str) -> str:
-    key = _normalize_key(key)
+    """对象的公网 URL：`S3_PUBLIC_BASE_URL/<key>`（R2 的 r2.dev 或自定义域名、CDN），否则 `<endpoint>/<bucket>/<key>`。
+
+    key 中的中文 / 空格等按 RFC 3986 转义（保留 `/`），保证 URL 可直接放进 `<img>` / `<video>` 与方舟请求。
+    """
+    key = quote(_normalize_key(key), safe="/")
     if settings.s3_public_base_url:
         base = settings.s3_public_base_url.rstrip("/")
         return f"{base}/{key}"
@@ -124,49 +175,153 @@ def _build_public_url(key: str) -> str:
     return f"/{settings.s3_bucket_name}/{key}"
 
 
-def init_storage() -> None:
-    """初始化对象存储（例如创建 bucket）。
+def public_url_for_key(key: str) -> str:
+    """对外暴露的公网 URL 计算（S3 模式）；直传登记时用它校验浏览器回传的 URL。"""
+    return _build_public_url(key)
+
+
+def _cors_rule_present(rules: list[dict[str, Any]]) -> bool:
+    """桶上是否已有一条「允许任意来源 GET/HEAD/PUT」的规则（手工在控制台配置的也算）。"""
+    for rule in rules or []:
+        origins = set(rule.get("AllowedOrigins") or [])
+        methods = {m.upper() for m in (rule.get("AllowedMethods") or [])}
+        if "*" in origins and {"GET", "PUT"} <= methods:
+            return True
+    return False
+
+
+def ensure_bucket_cors(client: Any | None = None) -> bool:
+    """确保桶允许浏览器跨域 PUT（直传）与 GET（合成导出 fetch 片段）；已有等价规则则不写。返回是否写入。
+
+    R2 / S3 的 PutBucketCors 需要桶级（管理）权限；只给了对象读写权限的令牌会抛 AccessDenied，
+    调用方按「尽力而为」处理并提示在控制台手工配置。
+    """
+    client = client or _build_s3_client()
+    bucket = settings.s3_bucket_name
+    try:
+        existing = client.get_bucket_cors(Bucket=bucket).get("CORSRules", [])
+    except ClientError as e:
+        code = str(e.response.get("Error", {}).get("Code", ""))
+        if code not in {"NoSuchCORSConfiguration", "404", "NotFound"}:
+            raise
+        existing = []
+    if _cors_rule_present(existing):
+        return False
+    client.put_bucket_cors(Bucket=bucket, CORSConfiguration={"CORSRules": [*existing, dict(_CORS_RULE)]})
+    return True
+
+
+def init_storage(*, configure_cors: bool = True) -> dict[str, Any]:
+    """初始化对象存储：确保 bucket 存在，并（可选）写入浏览器直传需要的 CORS 规则。
 
     说明：
-    - 若 bucket 已存在则直接返回；
-    - 若无权限/配置错误会抛出异常，便于在部署时尽早失败；
-    - 对于部分 S3 兼容服务（MinIO 等），CreateBucket 的参数可能不同，这里尽量兼容常见情形。
+    - 若 bucket 已存在则不重复创建；R2 / region=auto 不带 LocationConstraint，AWS 非 us-east-1 才带；
+    - 若无权限 / 配置错误会抛出异常，便于在部署时尽早失败；
+    - CORS 写入失败（通常是令牌没有桶级权限）只记录警告、不抛出，返回值里标明 `cors=error`。
+    返回 `{"bucket_created": bool, "cors": "written" | "present" | "skipped" | "error"}`。
     """
     if _use_blob():
         # Vercel Blob store 由平台创建并通过环境变量注入凭证，无需初始化。
-        return
+        return {"bucket_created": False, "cors": "skipped"}
 
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if not bucket:
         raise RuntimeError("S3 未配置：缺少 s3_bucket_name")
 
+    created = False
     try:
         client.head_bucket(Bucket=bucket)
-        return
     except ClientError as e:
         code = str(e.response.get("Error", {}).get("Code", ""))
         # 常见不存在：404 / NoSuchBucket / NotFound
         if code not in {"404", "NoSuchBucket", "NotFound"}:
             raise
+        params: dict[str, Any] = {"Bucket": bucket}
+        region = _s3_region()
+        # AWS S3 在 us-east-1 不需要 LocationConstraint，其他 region 需要；R2（auto）不接受该参数
+        if region and region not in {"us-east-1", "auto"}:
+            params["CreateBucketConfiguration"] = {"LocationConstraint": region}
+        try:
+            client.create_bucket(**params)
+            created = True
+        except ClientError as e2:
+            # 可能出现并发创建或服务端返回已存在
+            code = str(e2.response.get("Error", {}).get("Code", ""))
+            if code not in {"BucketAlreadyOwnedByYou", "BucketAlreadyExists"}:
+                raise
+        # 再次确认 bucket 可用
+        client.head_bucket(Bucket=bucket)
 
-    params: dict[str, Any] = {"Bucket": bucket}
-    region = settings.s3_region_name
-    # AWS S3 在 us-east-1 不需要 LocationConstraint，其他 region 需要
-    if region and region != "us-east-1":
-        params["CreateBucketConfiguration"] = {"LocationConstraint": region}
+    cors = "skipped"
+    if configure_cors:
+        try:
+            cors = "written" if ensure_bucket_cors(client) else "present"
+        except Exception as exc:
+            logger.warning("storage: could not configure bucket CORS (configure it in the console): %s", exc)
+            cors = "error"
+    return {"bucket_created": created, "cors": cors}
 
+
+def generate_presigned_put_url(*, key: str, content_type: str | None, expires_in: int = PRESIGNED_PUT_EXPIRES_SECONDS) -> str:
+    """为浏览器直传签发预签名 PUT URL（S3 / R2）。
+
+    浏览器必须用同样的 Content-Type 头 PUT（它参与签名），文件内容不经过后端函数。
+    这是本地 HMAC 计算，不发网络请求。
+    """
+    client = _build_s3_client()
+    params: dict[str, Any] = {"Bucket": settings.s3_bucket_name, "Key": _normalize_key(key)}
+    if content_type:
+        params["ContentType"] = content_type
+    return client.generate_presigned_url("put_object", Params=params, ExpiresIn=expires_in, HttpMethod="PUT")  # type: ignore[no-any-return]
+
+
+def describe_storage() -> dict[str, Any]:
+    """面向诊断接口的存储配置摘要（不含密钥）：后端、桶、端点主机、公网基址、是否 R2、直传方式。"""
+    backend = storage_backend()
+    info: dict[str, Any] = {"backend": backend}
+    if backend == "s3":
+        info.update(
+            {
+                "bucket": settings.s3_bucket_name,
+                "endpoint_host": urlparse(settings.s3_endpoint_url or "").hostname,
+                "region": _s3_region(),
+                "public_base_url": settings.s3_public_base_url,
+                "cloudflare_r2": is_cloudflare_r2(),
+                "configured": bool(settings.s3_bucket_name),
+            }
+        )
+    else:
+        token = blob_read_write_token()
+        info.update({"store_id": blob_store_id_from_token(token) if token else None, "access": _blob_access(), "configured": bool(token)})
+    return info
+
+
+async def probe_storage() -> dict[str, Any]:
+    """对当前存储做一次轻量只读探测：S3 为 HeadBucket，Blob 为 head 一个不存在的路径（能区分「未找到」与「已暂停」）。"""
+    out: dict[str, Any] = {}
+    t0 = time.perf_counter()
     try:
-        client.create_bucket(**params)
-    except ClientError as e:
-        # 可能出现并发创建或服务端返回已存在
-        code = str(e.response.get("Error", {}).get("Code", ""))
-        if code in {"BucketAlreadyOwnedByYou", "BucketAlreadyExists"}:
-            return
-        raise
-
-    # 再次确认 bucket 可用
-    client.head_bucket(Bucket=bucket)
+        if _use_blob():
+            try:
+                await _blob_head(key="_deploy/probe-does-not-exist")
+            except Exception as exc:  # noqa: BLE001
+                wrapped = _wrap_blob_error(exc, "probe")
+                if isinstance(wrapped, StorageUnavailableError) or type(exc).__name__ != "BlobNotFoundError":
+                    raise wrapped from exc
+            out["ok"] = True
+        elif settings.s3_bucket_name:
+            client = _build_s3_client()
+            await to_thread.run_sync(lambda: client.head_bucket(Bucket=settings.s3_bucket_name))
+            out["ok"] = True
+        else:
+            out["ok"] = False
+            out["error"] = "storage is not configured"
+    except Exception as exc:  # noqa: BLE001
+        out["ok"] = False
+        out["error"] = f"{type(exc).__name__}: {exc}"[:300]
+    out["ms"] = int((time.perf_counter() - t0) * 1000)
+    return out
 
 
 async def upload_file(

@@ -79,7 +79,10 @@ CreatorPage
 ### 上传（`pages/creator/actions.ts`）
 
 - 图片：浏览器缩到 ≤2048px JPEG → `POST files/upload`（经函数，≤4.5 MB）。
-- 视频 / 音频（`uploadMedia`）：`GET files/direct-upload/capabilities` → 存储为 Vercel Blob 时走浏览器直传：`POST files/direct-upload/prepare` 拿 `storage_key` / `pathname` → `@vercel/blob/client` 的 `upload()`（`handleUploadUrl=/files/client-upload`，后端按 `@vercel/blob` 的 `generateClientTokenFromReadWriteToken` 同算法签发客户端令牌，已与 node 实现逐字节比对）→ `POST files/direct-upload/register` 登记为 FileItem（按扩展名判定 image / video / audio；音频为 mp3 / wav / m4a / aac）；S3 模式退回 `files/upload` 并限制 4 MB。
+- 视频 / 音频（`uploadMedia`）：`GET files/direct-upload/capabilities` 返回 `direct = vercel_blob | s3 | null` → `POST files/direct-upload/prepare`（带 `filename` / `content_type`）拿 `storage_key` / `pathname`：
+  - `vercel_blob`：`@vercel/blob/client` 的 `upload()`（`handleUploadUrl=/files/client-upload`，后端按 `@vercel/blob` 的 `generateClientTokenFromReadWriteToken` 同算法签发客户端令牌，已与 node 实现逐字节比对）；
+  - `s3`（Cloudflare R2 / AWS / MinIO）：prepare 额外返回预签名 `upload_url`（boto3 本地签名，1 小时有效，Content-Type 参与签名）与 `public_url`，浏览器 `fetch(upload_url, PUT)` 直接写桶，桶需允许跨域 PUT（启动时 `ensure_storage_ready` 尽力写入 CORS 规则）；
+  - 之后 `POST files/direct-upload/register` 登记为 FileItem（按扩展名判定 image / video / audio；音频为 mp3 / wav / m4a / aac）。Blob 模式校验 URL 指向 blob.vercel-storage.com 上同一路径；S3 模式校验 URL 等于后端计算的公网 URL 并 HeadObject 确认对象已上传。无直传后端时退回 `files/upload` 并限制 4 MB。
 
 ## 后端
 
@@ -116,7 +119,11 @@ CreatorPage
 
 ### 浏览器直传（`app/services/studio/direct_upload.py`，路由 `routes/studio/uploads.py`）
 
-`GET /files/direct-upload/capabilities`、`POST /files/direct-upload/prepare`、`POST /files/client-upload`（`@vercel/blob` handleUpload 协议，裸 JSON 响应）、`POST /files/direct-upload/register`。令牌只对本服务生成的 `uploads/<uuid>/<name>` 路径签发，登记时校验 URL 指向同一路径。
+`GET /files/direct-upload/capabilities`、`POST /files/direct-upload/prepare`、`POST /files/client-upload`（`@vercel/blob` handleUpload 协议，裸 JSON 响应，仅 Blob 模式）、`POST /files/direct-upload/register`。凭证（Blob 客户端令牌 / S3 预签名 PUT）只对本服务生成的 `uploads/<uuid>/<name>` 路径签发，登记时校验 URL 指向同一对象（S3 模式还 HeadObject 确认存在）。
+
+### 对象存储（`app/core/storage.py`）
+
+`storage_backend()`：配置了 `S3_BUCKET_NAME` 为 `s3`，否则有 Blob 令牌为 `vercel_blob`。S3 路径对 Cloudflare R2 自动适配（端点 `*.r2.cloudflarestorage.com`：region `auto`、path-style、关闭 boto3 默认 CRC 校验、建桶不带 LocationConstraint）；对象公网 URL 为 `S3_PUBLIC_BASE_URL/<key>`（key 按 RFC 3986 转义）。`init_storage()` 建桶并写入「任意来源 GET/HEAD/PUT」的 CORS 规则（直传与合成导出 fetch 片段都要它），Vercel 上由 `deploy_bootstrap.ensure_storage_ready` 在冷启动时尽力执行，令牌无桶级权限时记为 error 不阻断。`/_deploy/status` 的 `storage` 字段给出后端、桶、端点主机、直传方式与一次 HeadBucket 探测结果。
 
 ### api 层
 

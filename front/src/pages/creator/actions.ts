@@ -493,15 +493,41 @@ export async function generateVideo(args: { shot: CreatorShotRead; ratio: VideoR
   if (!res.data?.task_id) throw new Error(res.message || '视频任务创建失败')
 }
 
+/** 直传完成后登记为文件记录（Blob / S3 两条直传路径共用），返回文件 ID。 */
+async function registerDirectUpload(file: File, scope: UploadScope, storageKey: string, url: string): Promise<string> {
+  const registered = await StudioFilesService.directUploadRegisterApiApiV1StudioFilesDirectUploadRegisterPost({
+    requestBody: {
+      storage_key: storageKey,
+      url,
+      name: file.name,
+      content_type: file.type || null,
+      size: file.size,
+      project_id: scope.projectId,
+      chapter_id: scope.chapterId ?? null,
+      shot_id: scope.shotId ?? null,
+      usage_kind: scope.usageKind,
+    },
+  })
+  const id = registered.data?.id
+  if (!id) throw new Error(registered.message || '上传登记失败')
+  return id
+}
+
 /**
- * 上传一段视频或音频：存储是 Vercel Blob 时浏览器直传（绕开函数 4.5 MB 请求体上限），否则走多部分上传并限制大小。
+ * 上传一段视频或音频：能直传时由浏览器直接把文件 PUT 到对象存储（绕开函数 4.5 MB 请求体上限），否则走多部分上传并限制大小。
+ *
+ * - Vercel Blob：`@vercel/blob/client` 的 `upload()`，后端签发客户端令牌；
+ * - S3 兼容（Cloudflare R2 等）：后端返回预签名 PUT URL，浏览器带同样的 Content-Type 直接 PUT，桶需允许跨域 PUT。
  * 返回文件 ID。
  */
 export async function uploadMedia(file: File, scope: UploadScope, fallbackContentType: string): Promise<string> {
   const caps = await StudioFilesService.directUploadCapabilitiesApiApiV1StudioFilesDirectUploadCapabilitiesGet()
   const kindLabel = fallbackContentType.startsWith('audio/') ? '音频' : '视频'
+  const contentType = file.type || fallbackContentType
   if (caps.data?.direct === 'vercel_blob') {
-    const prepared = await StudioFilesService.directUploadPrepareApiApiV1StudioFilesDirectUploadPreparePost({ requestBody: { filename: file.name } })
+    const prepared = await StudioFilesService.directUploadPrepareApiApiV1StudioFilesDirectUploadPreparePost({
+      requestBody: { filename: file.name, content_type: contentType },
+    })
     const storageKey = prepared.data?.storage_key
     const pathname = prepared.data?.pathname
     if (!storageKey || !pathname) throw new Error(prepared.message || '上传准备失败')
@@ -509,25 +535,32 @@ export async function uploadMedia(file: File, scope: UploadScope, fallbackConten
     const result = await upload(pathname, file, {
       access: 'public',
       handleUploadUrl: `${OpenAPI.BASE}/api/v1/studio/files/client-upload`,
-      contentType: file.type || fallbackContentType,
+      contentType,
       multipart: file.size > 8 * 1024 * 1024,
     })
-    const registered = await StudioFilesService.directUploadRegisterApiApiV1StudioFilesDirectUploadRegisterPost({
-      requestBody: {
-        storage_key: storageKey,
-        url: result.url,
-        name: file.name,
-        content_type: file.type || null,
-        size: file.size,
-        project_id: scope.projectId,
-        chapter_id: scope.chapterId ?? null,
-        shot_id: scope.shotId ?? null,
-        usage_kind: scope.usageKind,
-      },
+    return registerDirectUpload(file, scope, storageKey, result.url)
+  }
+  if (caps.data?.direct === 's3') {
+    const prepared = await StudioFilesService.directUploadPrepareApiApiV1StudioFilesDirectUploadPreparePost({
+      requestBody: { filename: file.name, content_type: contentType },
     })
-    const id = registered.data?.id
-    if (!id) throw new Error(registered.message || '上传登记失败')
-    return id
+    const storageKey = prepared.data?.storage_key
+    const uploadUrl = prepared.data?.upload_url
+    const publicUrl = prepared.data?.public_url
+    if (!storageKey || !uploadUrl || !publicUrl) throw new Error(prepared.message || '上传准备失败')
+    let res: Response
+    try {
+      res = await fetch(uploadUrl, {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': prepared.data?.headers?.['Content-Type'] ?? contentType },
+      })
+    } catch {
+      // 预签名 URL 的 PUT 被浏览器拦下，几乎都是桶没有允许本站跨域 PUT（CORS）
+      throw new Error('浏览器无法直传到对象存储：请检查存储桶（Cloudflare R2 / S3）的 CORS 规则是否允许本站 PUT')
+    }
+    if (!res.ok) throw new Error(`${kindLabel}上传到对象存储失败（HTTP ${res.status}），请稍后重试`)
+    return registerDirectUpload(file, scope, storageKey, publicUrl)
   }
   const max = caps.data?.max_server_upload_bytes ?? 4 * 1024 * 1024
   if (file.size > max) throw new Error(`${kindLabel}超过 ${Math.round(max / 1024 / 1024)} MB，当前存储不支持浏览器直传，请压缩后再传`)

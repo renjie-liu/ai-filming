@@ -127,16 +127,19 @@ class Settings(BaseSettings):
             return []
         return [x.strip() for x in s.split(",") if x.strip()]
 
-    # S3 / 对象存储（用于素材文件）
+    # S3 / 对象存储（用于素材文件）：AWS S3、Cloudflare R2（endpoint https://<account_id>.r2.cloudflarestorage.com）、MinIO / RustFS
     s3_endpoint_url: str | None = None
+    # R2 不填即为 auto；AWS 填真实 region
     s3_region_name: str | None = None
     s3_access_key_id: str | None = None
     s3_secret_access_key: str | None = None
     s3_bucket_name: str | None = None
     # 可选：统一前缀，方便按环境/项目隔离，如 "jellyfish/dev"
     s3_base_path: str = ""
-    # 可选：对外访问基址（CDN 或自定义域名），为空则使用 S3 自带 URL 或预签名 URL
+    # 可选：对外访问基址（R2 的 r2.dev 公开域名、自定义域名或 CDN），为空则使用 <endpoint>/<bucket>/<key>
     s3_public_base_url: str | None = None
+    # 可选：寻址方式 path / virtual；不填时 R2 用 path，其它用 virtual
+    s3_addressing_style: str | None = None
 
     # Vercel Blob（未配置 S3 且存在 BLOB_READ_WRITE_TOKEN 时作为对象存储）
     blob_read_write_token: str | None = None

@@ -9,7 +9,7 @@ This fork runs the whole stack in a single Vercel project using
 | API (`backend/`) | uvicorn | `api` service (FastAPI on Vercel Functions) |
 | Task workers | Celery + Redis | **In-process** inside the API function (`TASK_EXECUTION_MODE=inline`, kept alive with `wait_until`). Optional: Celery on Vercel Queues (`TASK_EXECUTION_MODE=celery`, subscriber `backend/worker.py`) |
 | Database | MySQL | **Postgres** (Neon via Vercel Marketplace) |
-| Object storage | RustFS / S3 | **Vercel Blob** (public store) |
+| Object storage | RustFS / S3 | **Cloudflare R2** (or any S3-compatible bucket) via `S3_*` variables; **Vercel Blob** is used when only the Blob token is present (see [Object storage](#object-storage-cloudflare-r2)) |
 | DB init / seed SQL | init containers | `app/deploy_bootstrap.py` on cold start (idempotent) |
 
 Routing is defined in `/vercel.json`: `/api/*`, `/docs`, `/openapi.json` go to the
@@ -43,7 +43,8 @@ Users never enter an API key in the app. Model Management shows the provider as
 "Managed by deployment".
 
 `DATABASE_URL` / `POSTGRES_URL` and `BLOB_READ_WRITE_TOKEN` are injected automatically
-when the Neon database and Blob store are connected.
+when the Neon database and Blob store are connected. For the recommended R2 object
+storage, see [Object storage: Cloudflare R2](#object-storage-cloudflare-r2).
 
 <details>
 <summary>Optional overrides</summary>
@@ -60,11 +61,83 @@ when the Neon database and Blob store are connected.
 Without a database URL the API falls back to an ephemeral SQLite file in `/tmp`
 (smoke tests only: data is lost and is not shared between instances).
 
+## Object storage: Cloudflare R2
+
+Generated images / videos and user uploads go to an S3-compatible bucket when
+`S3_BUCKET_NAME` is set; otherwise to Vercel Blob. Cloudflare R2 is the recommended
+bucket: its free tier (10 GB storage, 1 M writes and 10 M reads per month, **no egress
+fee**) is per account and is not suspended team-wide the way Hobby Blob is. The backend
+detects an R2 endpoint (`*.r2.cloudflarestorage.com`) and applies R2's differences by
+itself: region `auto`, path-style addressing, no default CRC checksums, no
+`LocationConstraint` on bucket creation. Browser uploads of videos / audio use a
+presigned PUT URL (1 h, signed Content-Type), so files never pass through the function.
+
+Setup (Cloudflare dashboard → R2 Object Storage):
+
+1. **Create a bucket**, e.g. `ai-filming-media` (location hint: Asia-Pacific is fine;
+   R2 picks the actual region).
+2. **Public access**: bucket → Settings → *Public Development URL* → Enable (gives
+   `https://pub-<hash>.r2.dev`), or attach a custom domain on a zone in the same
+   account (better: r2.dev is rate-limited and meant for development). Generated
+   assets are referenced by this URL from the browser and from the Ark (Seedance)
+   API, so the bucket must be publicly readable; keys contain UUIDs and are
+   unguessable.
+3. **CORS** (bucket → Settings → CORS policy). Needed for browser uploads and for
+   在浏览器内合成导出 (which `fetch`es clips). The app writes this rule itself on cold
+   start when the token has admin rights; otherwise paste it:
+
+   ```json
+   [
+     {
+       "AllowedOrigins": ["*"],
+       "AllowedMethods": ["GET", "HEAD", "PUT"],
+       "AllowedHeaders": ["*"],
+       "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+
+4. **API token**: R2 → *Manage R2 API Tokens* → Create. Permission *Object Read &
+   Write* scoped to the bucket is enough for the app; *Admin Read & Write* additionally
+   lets the app create the bucket and write the CORS rule itself. Copy the **Access Key
+   ID**, **Secret Access Key** and the **S3 endpoint**
+   (`https://<account_id>.r2.cloudflarestorage.com`) shown after creation.
+5. Add these variables to the Vercel project (Production, and Preview if you use it),
+   then redeploy:
+
+   | Variable | Value |
+   | --- | --- |
+   | `S3_ENDPOINT_URL` | `https://<account_id>.r2.cloudflarestorage.com` |
+   | `S3_REGION_NAME` | `auto` (optional; default for R2) |
+   | `S3_ACCESS_KEY_ID` | the token's Access Key ID |
+   | `S3_SECRET_ACCESS_KEY` | the token's Secret Access Key (mark as sensitive) |
+   | `S3_BUCKET_NAME` | `ai-filming-media` |
+   | `S3_PUBLIC_BASE_URL` | `https://pub-<hash>.r2.dev` or `https://media.example.com` |
+   | `S3_BASE_PATH` | optional prefix, e.g. `prod` |
+
+Verify with `GET /api/v1/_deploy/status`: `storage.backend` is `s3`,
+`storage.cloudflare_r2` is `true`, `storage.direct_upload` is `s3` and `storage.ok` is
+`true` (one `HeadBucket` call); `bootstrap.summary.storage.cors` is `written` or
+`present` when the CORS rule is in place, `error` when the token lacks bucket
+permissions (then configure CORS by hand as above). Then upload a video in step ④ and
+check that the file appears in the bucket under `uploads/<uuid>/`.
+
+Notes:
+
+- Files generated while Blob was the backend keep their `blob.vercel-storage.com` URLs
+  and are not migrated; they load again once the Blob suspension lifts. New files go to
+  R2 only. `BLOB_READ_WRITE_TOKEN` can stay connected; `S3_BUCKET_NAME` takes precedence.
+- Any other S3-compatible store works with the same variables (AWS S3 with a real
+  region; MinIO / RustFS with `S3_ADDRESSING_STYLE=path`).
+- Local development: put the same variables in `backend/.env` (see `.env.example`).
+
 ## Health check
 
 `GET /api/v1/_deploy/status` reports the database dialect and row counts, the
-storage backend, the Celery broker scheme, the bootstrap result, and the configured
-Ark models. Add `?probe_ark=true` to make read-only calls to the Ark API
+storage backend (`storage`: backend, bucket, endpoint host, direct-upload mode and a
+`HeadBucket` / Blob head probe, no secrets), the Celery broker scheme, the bootstrap
+result, and the configured Ark models. Add `?probe_ark=true` to make read-only calls to the Ark API
 (list models / list video tasks; these don't generate anything or cost money).
 Add `?probe_models=true` to check which candidate Seed / Seedream / Seedance models
 your account has activated. Each model gets a deliberately incomplete request:
@@ -135,12 +208,11 @@ Fixes, pick one:
    page); the stores resume immediately.
 2. Wait for the 30-day window to pass (about 30 days after the suspension);
    keep other projects' Blob traffic in mind, the allowance is team-wide.
-3. Point the backend at any S3-compatible bucket instead of Blob: set
-   `S3_ENDPOINT_URL`, `S3_REGION_NAME`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`,
-   `S3_BUCKET_NAME` (and `S3_PUBLIC_BASE_URL` for a public CDN host) in the
-   project environment and redeploy; `storage_backend` in `/_deploy/status`
-   switches to `s3`. Cloudflare R2's free tier (10 GB) is enough for hobby use.
-   Files already stored in Blob stay readable through their public URLs.
+3. Point the backend at Cloudflare R2 (or any S3-compatible bucket) instead of
+   Blob, see [Object storage: Cloudflare R2](#object-storage-cloudflare-r2);
+   `storage.backend` in `/_deploy/status` switches to `s3`. This is the path this
+   fork is set up for. Files already stored in Blob keep their Blob URLs and become
+   readable again when the suspension lifts.
 
 ## Troubleshooting: Neon quota exceeded (every API call returns 503)
 

@@ -1,6 +1,7 @@
-"""文件浏览器直传路由（Vercel Blob）：能力探测、准备路径、签发客户端令牌、登记结果。
+"""文件浏览器直传路由（Vercel Blob / S3 兼容含 Cloudflare R2）：能力探测、准备、签发凭证、登记结果。
 
 `/client-upload` 实现 `@vercel/blob/client` 的 handleUpload 协议，响应体是协议要求的裸 JSON，不包 ApiResponse。
+S3 模式不经过该接口：`/direct-upload/prepare` 直接返回预签名 PUT URL。
 """
 
 from __future__ import annotations
@@ -17,9 +18,9 @@ from app.schemas.studio import FileRead
 from app.services.studio.direct_upload import (
     MAX_DIRECT_UPLOAD_BYTES,
     MAX_SERVER_UPLOAD_BYTES,
-    build_upload_key,
     direct_upload_backend,
     issue_client_token,
+    prepare_direct_upload,
     register_uploaded_file,
 )
 
@@ -29,18 +30,23 @@ router = APIRouter()
 class DirectUploadCapabilitiesRead(BaseModel):
     """前端据此决定走直传还是经函数上传。"""
 
-    direct: str | None = Field(None, description="可用的直传后端：vercel_blob；None 表示只能经函数上传")
+    direct: str | None = Field(None, description="可用的直传后端：vercel_blob（客户端令牌）或 s3（预签名 PUT，含 R2）；None 表示只能经函数上传")
     max_server_upload_bytes: int = Field(..., description="经函数上传的建议大小上限（字节）")
     max_direct_upload_bytes: int = Field(..., description="直传大小上限（字节）")
 
 
 class DirectUploadPrepareRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=255)
+    content_type: str | None = Field(None, max_length=100, description="浏览器给出的 MIME 类型；S3 模式参与预签名，PUT 时必须原样携带")
 
 
 class DirectUploadPrepareRead(BaseModel):
+    backend: str = Field(..., description="本次直传使用的后端：vercel_blob 或 s3")
     storage_key: str = Field(..., description="登记时回传的存储 key")
-    pathname: str = Field(..., description="浏览器直传时使用的 Blob pathname")
+    pathname: str = Field(..., description="对象路径；Blob 直传时作为 `upload()` 的 pathname")
+    upload_url: str | None = Field(None, description="s3：浏览器直接 PUT 的预签名 URL；vercel_blob 为空")
+    public_url: str | None = Field(None, description="s3：上传完成后的公网 URL，登记时原样回传；vercel_blob 为空")
+    headers: dict[str, str] | None = Field(None, description="s3：PUT 必须携带的请求头（Content-Type）")
 
 
 class ClientUploadEvent(BaseModel):
@@ -74,12 +80,19 @@ async def direct_upload_capabilities_api() -> ApiResponse[DirectUploadCapabiliti
     )
 
 
-@router.post("/direct-upload/prepare", response_model=ApiResponse[DirectUploadPrepareRead], summary="直传准备：生成存储 key 与 pathname")
+@router.post("/direct-upload/prepare", response_model=ApiResponse[DirectUploadPrepareRead], summary="直传准备：生成存储 key / pathname，S3 模式附预签名 PUT URL")
 async def direct_upload_prepare_api(body: DirectUploadPrepareRequest) -> ApiResponse[DirectUploadPrepareRead]:
-    if direct_upload_backend() is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="direct upload is unavailable: storage backend is not vercel_blob")
-    storage_key, pathname = build_upload_key(body.filename)
-    return success_response(DirectUploadPrepareRead(storage_key=storage_key, pathname=pathname))
+    prepared = prepare_direct_upload(filename=body.filename, content_type=body.content_type)
+    return success_response(
+        DirectUploadPrepareRead(
+            backend=prepared.backend,
+            storage_key=prepared.storage_key,
+            pathname=prepared.pathname,
+            upload_url=prepared.upload_url,
+            public_url=prepared.public_url,
+            headers=prepared.headers,
+        )
+    )
 
 
 @router.post("/client-upload", summary="直传：签发 Vercel Blob 客户端令牌（@vercel/blob handleUpload 协议）")

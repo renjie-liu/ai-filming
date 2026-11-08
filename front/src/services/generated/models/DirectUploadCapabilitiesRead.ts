@@ -7,7 +7,7 @@
  */
 export type DirectUploadCapabilitiesRead = {
     /**
-     * 可用的直传后端：vercel_blob；None 表示只能经函数上传
+     * 可用的直传后端：vercel_blob（客户端令牌）或 s3（预签名 PUT，含 R2）；None 表示只能经函数上传
      */
     direct?: (string | null);
     /**

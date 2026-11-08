@@ -366,6 +366,26 @@ async def run_deploy_bootstrap() -> dict[str, Any]:
         "prompt_templates_added": added_templates,
         "ark_provider_changed": ark_changed,
         "shot_details_backfilled": details_backfilled,
+        "storage": await ensure_storage_ready(),
     }
     logger.info("deploy bootstrap done: %s", summary)
     return summary
+
+
+async def ensure_storage_ready() -> dict[str, Any]:
+    """S3 / R2 模式下确保桶存在并带有浏览器直传需要的 CORS 规则（尽力而为，失败不阻断启动）。
+
+    为什么在这里：Vercel 没有 init 容器跑 `init_storage.py`；桶级操作需要管理权限，只有对象读写权限的
+    令牌会失败，此时返回 `error` 并由文档指引在控制台手工建桶 / 配 CORS。Blob 模式无需初始化。
+    """
+    import asyncio
+
+    from app.core import storage
+
+    if storage.storage_backend() != "s3" or not settings.s3_bucket_name:
+        return {"skipped": True}
+    try:
+        return await asyncio.to_thread(storage.init_storage)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("deploy bootstrap: storage init failed (bucket/CORS must be configured manually): %s", exc)
+        return {"error": f"{type(exc).__name__}: {exc}"[:300]}
