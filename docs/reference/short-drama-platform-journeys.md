@@ -86,6 +86,32 @@
 
 不借鉴：无限画布 / 节点编辑器、3D 导演台（学习成本高，短剧主流程用线性五步 + 表格更直接）。
 
+## 第三轮：镜头连贯、成片预览与风格预设（2026-11-08）
+
+起因是用户反馈：分镜之间太不连贯、没有合并预览、开头的风格选择太少。再看一轮主流平台在这三件事上的做法（来源以教程 / 评测为主，官方口径只有方舟 API 文档，细节可信度参差，见文末）。
+
+### 各平台怎么做连贯
+
+- **即梦「智能多帧」**：上传最多 10 张关键帧生成约 54 秒的连贯长镜头；2.0 版增加视频拼接、锁定某个时段局部修改、「只设尾帧」模式。首尾帧模式是「起始帧 + 结束帧 + 过渡描述」，用来做镜头切换；角色一致性靠「先出角色种子图，再在分镜里开角色参考并提高权重」。短剧工作室把分镜放在时间轨道上组织与预览。
+- **可灵**：评测里「首尾帧控制」被用来做一镜到底的运镜；**海螺**同样有首尾帧与长镜头生成，另有声音克隆；**Vidu** 的卖点是多主体角色锁定（同时传多个人物参考图）；**剪映**在「交付整部剧」的榜单里合成（字幕 / 配音 / 成片）分最高、解析与一致性分最低，常作为即梦素材的后道。
+- **Seedance / 方舟 API**（我们在用）：`return_last_frame`（默认 false）开启后，可通过「查询任务」接口拿到视频尾帧；Seedance 2.5 的全能参考任务含「参考生视频 / 视频编辑 / 视频延长」三类子任务，2.5 与 2.0 系列接受视频输入。第三方封装（ComfyUI 节点、API 转售商）都把尾帧暴露为 `last_frame_url`，并把它作为下一段的首帧串成长片；方舟官方的「肖像资产指南」说明同账号近 30 天内 Seedance 生成的视频 / 尾帧、Seedream 5.0 文生图属于受信产物，含人脸也可作输入。
+
+### 各平台的风格入口
+
+- 即梦短剧工作室建项目时选题材（都市逆袭 / 古风 / 玄幻…）与竖屏比例，风格选项见于教程的有「写实真人 / 古风二次元 / 3D 动画」；第三方整理称即梦支持电影级写实、二次元（日系 / 国风）、3D 动画、复古胶片、水墨国风，可混合与自定义。
+- 攻略普遍把风格分「2D 动漫 / 3D 动画 / 仿真人」三大类，并给每类一组固定提示词（如仿真人用「真实场景，电影质感，写实唯美」）——说明「风格 = 一段稠密提示词」是行业通行做法，而不是一个枚举值。
+- 港风、黏土、像素等在搜到的资料里没有确认为任何平台的预设按钮；赛博朋克、水墨画出现在即梦的提示词示例中。
+
+### 落到 Jellyfish 的改动（已完成）
+
+| 问题 | 做法 | 依据 |
+| --- | --- | --- |
+| 分镜不连贯 | 视频任务带 `return_last_frame`，尾帧转存为 `ShotFrameImage(last)`；下一镜在全能参考里多一张「上一镜结尾画面（承接光线 / 时间 / 场景布置 / 人物站位；本镜按新的景别与运镜重新构图）」；确认单「承接上一镜」开关默认开 → 逐镜串行生成 | 第三方「尾帧接首帧」串片法 + 方舟受信产物规则（尾帧含人脸不被拒）。不直接把尾帧当首帧，是因为短剧相邻镜头多为切镜而非一镜到底，用参考图保留光线 / 站位、让新景别自由构图更合适 |
+| 没有合并预览 | 成片页「合成预览」：ffmpeg.wasm 在浏览器里拼成整集 Blob 直接播放，WebVTT 字幕轨同步显示；「下载整集 mp4」复用同一 Blob | 即梦时间轨道预览、剪映合成；全部在浏览器内完成，不占服务端 |
+| 风格太少 | 新建作品改为 26 张风格卡（真人实拍 12 / 动画 7 / 艺术 7）+ 「风格补充」自由文本；每张卡是一段介质 / 镜头 / 光线 / 色彩 / 质感的提示词，经 `resolve_style_text` 进所有形象 / 关键帧 / 视频 / 剧本提示词 | 攻略里「风格 = 固定提示词组」的做法；覆盖即梦可见的写实 / 二次元 / 3D / 胶片 / 水墨，并补上短剧常见题材（悬疑黑色、古装、仙侠、年代、轻喜剧）与艺术向（黏土、像素、剪纸、油画） |
+
+未做：多关键帧生成一段长镜头（即梦智能多帧；Seedance 2.5 的视频延长 / 参考视频可做，但一镜 4–30 s 已够短剧用）；创作中途换风格并批量重跑；风格混合。见 `docs/plans/creator-mode.md`。
+
 ## 来源
 
 - Higgsfield：[How to Turn a Script into an AI Storyboard and Shot List](https://higgsfield.ai/blog/script-to-ai-storyboard-shot-list)、[Meet Higgsfield Popcorn](https://higgsfield.ai/blog/The-AI-Storyboard-Generator-That-Feels-Like-Directing)、[Best AI video platform for consistent characters](https://higgsfield.ai/blog/best-ai-video-consistent-characters)、[Cinema Studio / Soul ID masterclass](https://www.frankx.ai/guides/higgsfield-ai-video-guide)、[Higgsfield review: camera controls tested](https://dynalord.com/blog/higgsfield-review)、[Popcorn review](https://www.composite.global/news/higgsfield-popcorn-vs-nano-banana)
@@ -97,3 +123,5 @@
 - LTX Studio：[LTX Studio Review 2026: Storyboard-First Workflow](https://lumalabs.ai/news/ltx-studio-review)、[LTX Studio for Producers](https://ltx.io/studio/solution/producers)、[Script to Video](https://ltx.io/studio/platform/script-to-video)、[End-to-End AI Video Production](https://freeaitool.com/en/image-tools/069-ltx-studio-ai-video-production-complete-guide/)
 - 一站式平台盘点：[2026 年 AI 短剧平台推荐](https://zhuanlan.zhihu.com/p/2050989940557850145)、[7 款实用工具综合盘点](https://zhuanlan.zhihu.com/p/2050972345905554994)、[15 个 AI 短剧创作平台](https://ai-bot.cn/ai-skit-generation-tools/)、[AI 短剧制作教程：脚本、画面、配音到成片](https://www.550wai.cn/blog/ai-short-drama-production-guide.html)
 - 可灵 / Vidu / 海螺：[四款主流平台选型对比](https://www.sohu.com/a/1087337669_122988336)、[AI 短剧平台大横评](https://bbs.csdn.net/weixin_29056781/article/details/100282332)、[可灵 AI 逐镜制作实战](https://www.seektik.com/ai-short-drama-video-generation/)、[11 款 AI 短剧工具月活对比](https://zhuanlan.zhihu.com/p/2073378435280397521)
+- 第三轮（连贯 / 风格）：[做竖屏 AI 短剧用什么软件？2026 主流制作工具横向对比](https://news.qq.com/rain/a/20260624A06V0I00)、[AI 短剧生成工具深度对比：即梦、可灵与 Vidu](https://blog.csdn.net/u014177256/article/details/157644721)、[2026 最好用的 AI 短剧工具排名（按整剧交付能力）](https://sincosphere.cn/best/best-ai-short-drama-tools/)、[即梦 AI 零基础从入门到精通（智能多帧 / 首尾帧 / 多图参考）](https://www.toutiao.com/article/7668591940610327084/)、[即梦 AI 上线「短剧工作室」：三款自研模型](https://zhuanlan.zhihu.com/p/2098703785937868286)、[即梦短剧工作室保姆级教程（题材 / 风格设置）](https://www.sohu.com/a/1097007160_121124358)、[15 个 AI 短剧创作平台（即梦风格列表）](https://ai-bot.cn/ai-skit-generation-tools/)、[AI 短剧工具对决：即梦 vs 可灵（三类风格提示词）](https://post.smzdm.com/p/a032lqdw/)
+- 方舟 / Seedance 官方：[Create a video generation task（`return_last_frame`、支持模型、2.5 全能参考子任务）](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/create-video-generation-task-api)、[Seedance 肖像视频便利创作指南（受信模型产物规则）](https://docs.volcengine.com/docs/ark/seedance-portrait-asset-guide?lang=zh)、[为什么请求被判为敏感内容、如何减少误拒](https://ai.byteplus.com/en/help/article/why-was-my-request-rejected-for-sensitive-or-non-compliant-content-and-how-do-i-reduce-false-rejections)；第三方尾帧串片：[ModelArk Seedance 2.0 ComfyUI 节点（`last_frame_url` 输出）](https://comfy.icu/node/ModelArk-Seedance-2-0)、[awesome-seedance-2.5-api-prompts](https://github.com/Anil-matcha/awesome-seedance-2.5-api-prompts)

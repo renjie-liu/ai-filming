@@ -6,7 +6,7 @@
 
 | 路径 | 页面 | 职责 |
 | --- | --- | --- |
-| `/works` | 作品列表 `pages/creator/WorksPage.tsx` | 作品卡片（封面 = 第一张关键帧、集数 / 镜头 / 视频计数、删除需二次确认）；「新建作品」收集作品名、画面、题材、比例后直接进入创作页 |
+| `/works` | 作品列表 `pages/creator/WorksPage.tsx` | 作品卡片（封面 = 第一张关键帧、风格名、集数 / 镜头 / 视频计数、删除需二次确认）；「新建作品」收集作品名、画面风格（`StylePresetPicker`：按「真人实拍 / 动画 / 艺术」分组的预设卡片 + 可选的「风格补充」一句话）、比例后直接进入创作页；提交时把预设的 `key` / `visual_style` / `style` 一起写入 |
 | `/works/:projectId?chapter=<id>#<step>` | 创作页 `pages/creator/CreatorPage.tsx` | 一页五步：`script` / `cast` / `storyboard` / `video` / `final`；章节用 `?chapter=`，步骤用 hash；首次打开按进度推断步骤 |
 | `/models` `/settings` | 模型管理 / 系统设置 | 运维页面，不参与主流程 |
 | `/projects/*` | — | 旧路径，重定向到 `/works` |
@@ -51,7 +51,9 @@ CreatorPage
 | ④ 视频 | 开始生成 / 重试 | 每镜 `preview-prompt` → `POST film/tasks/video`。参考方式由 `videoPlan.ts` 按素材自动选：有角色 / 场景形象图 → `reference_mode=reference`（全能参考：形象图 + 关键帧，1–9 张 `images`，`reference_labels` 与之一一对应，提示词开头按 `[Image n]` 点名）；只有关键帧 → `first`；都没有 → `text_only`。Seedance 会拒绝含真人形象的参考图（`InputImageSensitiveContentDetected.PrivacyInformation`，写实风格的 AI 人像也会触发），此时重试按钮改为「改用文字描述重试」并以 `text_only` 重新提交。例外是方舟的「信任模型产物」规则：同账号近 30 天内由 Seedream 5.0 文生图得到的含人脸原图可直接作为参考图，因此自动配置的默认图片模型优先 Seedream 5.0（`ark_autoconfig`），形象图经本服务原样转存到对象存储后仍被放行（2026-11-08 在生产环境以 R2 上的 Seedream 5.0 形象图 + 全能参考模式实测通过）。关键帧是以形象图为参考的图生图，不在受信范围，中近景里人脸清晰时仍会被拒（错误里给出 `content[k]`）；`run_video_generation_task` 会按方舟 content 顺序找到被点名的那张图自动去掉（参考图则重编号 `[Image n]`，帧图则退回纯文字 + 剩余参考图）后立即重试，最多 4 次，被拒发生在生成前不计费；成功后把去掉的图记在任务结果 `dropped_references`，创作板 `video_task.note` 显示「视频平台拒绝了含真人形象的参考图（本镜头关键帧），已自动去掉后生成」 |
 | ④ 视频 | 调整（抽屉） | 参考方式 Segmented（形象参考 / 首帧图 / 仅文字）+ 参考素材勾选（勾选顺序 = `[Image n]`；角色的侧面 / 背面视图紧跟其正面之后列出，标「同一人」）+ 最终提示词可编辑（改过则按改过的文本提交，后端只补参考块不重写）；「上传自己的视频」→ `uploadVideo`（见下）→ `POST creator/shots/{id}/video-from-file` 设为成片 |
 | ④ 视频 | 配音 / 配乐参考 | 「上传配音 / 配乐」→ `uploadMedia`（与视频同一条直传路径，`usage_kind=reference_audio`）→ `POST creator/shots/{id}/audio-from-file`；镜头有音频时确认单标「+ 音频」，预览 / 提交都带 `audio_file_id`，提示词参考块多一行 `[Audio 1] 配音 / 配乐参考…`，payload 多一项 `role=reference_audio`（公网 URL）；「移除」→ `DELETE creator/shots/{id}/audio` |
-| ⑤ 成片 | 连播 / 下载 | 直接使用 `creator-board` 返回的 `video_url`（对象存储公网地址或 `/files/{id}/download`） |
+| ④ 视频 | 承接上一镜 / 逐镜串行 | 确认单上的「承接上一镜」开关（默认开）：`startSequential` 按镜头顺序一镜一镜提交，每镜 `preview-prompt` → `tasks/video` → `pollTask`（4 s 轮询、单镜 12 分钟上限）→ 重新拉创作板再排下一镜，头部显示「第 n / N 镜：标题」；`videoPlan.ts` 把上一镜的 `last_frame_url` 作为一条 `kind=continuity` 的参考图插在关键帧之前（说明文字 `CONTINUITY_REFERENCE_LABEL`：承接光线、时间、场景布置与人物站位，本镜按新的景别与运镜重新构图），有它时参考方式为 `reference`。关掉开关回到原来的并发提交且不带承接参考（`planFor(..., continuity=false)`）。单镜「重试」也带承接参考 |
+| ⑤ 成片 | 连播 / 下载 | 直接使用 `creator-board` 返回的 `video_url`（对象存储公网地址或 `/files/{id}/download`）；默认逐镜连播并预加载下一段 |
+| ⑤ 成片 | 合成预览 | 「合成预览」用与导出相同的 ffmpeg.wasm 流程拼成一个 Blob（不下载），播放器切到整集连续播放；字幕由 `buildVtt` 把对白按镜头时长排成 WebVTT，以 `<track kind="subtitles" default>` 挂在 `<video crossOrigin="anonymous">` 上。镜头顺序 / 视频文件变化时（`clipsKey`）预览自动失效需重新合成；「下载整集 mp4」直接复用该 Blob，不再二次拼接；「逐镜播放」/「回到整集预览」切换两种播放方式 |
 | ⑤ 成片 | 合成导出 | 纯前端（`pages/creator/exportEpisode.ts`）：ffmpeg.wasm 内核从本站 `/ffmpeg/`（构建时由 `vite-plugin-static-copy` 从 `@ffmpeg/core/dist/esm` 复制，约 31 MB；必须用 ESM 版，Vite 把 `@ffmpeg/ffmpeg` 的 worker 打成 module worker，`importScripts` 不可用）加载 → `fetchFile` 逐段下载（Vercel Blob 带 `access-control-allow-origin: *`）→ `concat` demuxer `-c copy` 拼接（参数不一致时退回 libx264 重编码）→ 浏览器下载 `<作品>-第N集.mp4`。「字幕 .srt」按镜头时长把各镜对白平均分配时间码（`buildSrt`），不烧进视频 |
 
 已在线验证（2026-11-07）：拆分镜 8 s（4 镜）→ 识别 41 s → 自动确认 → 4 张角色形象 → 4 张关键帧 → 4 段视频（1 段首帧参考 + 3 段因真人参考被拒后改文字）全部成功，耗时约 5 分钟。
@@ -116,6 +118,17 @@ CreatorPage
 - `reference_mode=reference`：`collect_reference_candidates` 按「角色 → 场景 → 道具 → 服装 → 关键帧」收集有形象图的关联实体（≤9），给每张一条 `[Image n]` 说明；`build_run_args` 把 file_id 转成对象存储公网 URL 放进 `VideoGenerationInput.reference_images`，方舟 payload 里是 `role=reference_image`（URL 直传，不占 64 MB 请求体）。首帧 / 首尾帧与全能参考互斥（契约校验）。
 - `audio_file_id`：任一模式都可带。`build_video_context` 记录到 `VideoGenerationContext.audio_file_id`，`prepend_reference_block(audio=True)` 在参考块末尾加 `[Audio 1]` 行（用户改过的提示词里已有 `[Audio 1]` 则不加）；`file_id_to_audio_url` 要求文件类型为 audio 且有公网 URL，放进 `VideoGenerationInput.reference_audio`，方舟 payload 为 `{"type":"audio_url","role":"reference_audio","audio_url":{"url":…}}`。该 payload 形状来自 Seedance 2.x 文档 / CLI，尚未用真实任务验证（Blob 存储恢复后补）。
 - 其它模式不变：帧图仍以 data URL 传 `first_frame` / `last_frame`。
+- **镜头衔接（承接上一镜）**：`video_payload.supports_last_frame(model)` 对支持的 Seedance 模型在 payload 里带 `return_last_frame: true`；`video_generation_tasks` 轮询到成功时把 `content.last_frame_url`（方舟给的 24 小时有效 jpeg，无水印）放进 `VideoGenerationResult.last_frame_url`；`persist_generated_video_to_shot` 随后调 `persist_last_frame_to_shot` 原样转存到对象存储（`generated-images/shot_last_frame/{shot_id}`）并写入 / 覆盖 `ShotFrameImage(frame_type=last)`（用途 `shot_frame`），转存失败只记日志，不影响视频落库。`build_context.collect_reference_candidates(include_continuity=True)` 在「角色 → 场景 → 道具 → 服装」之后、关键帧之前插入 `previous_shot_last_frame_file_id`（同章节 `index-1` 镜头的 last 帧），说明文字 `CONTINUITY_REFERENCE_LABEL`。创作板给每个镜头带 `last_frame_file_id` / `last_frame_url`，前端 `videoPlan.ts` 用同样的顺序构建参考清单，两边一致。方舟把同账号近 30 天内 Seedance 视频的尾帧视为受信产物，含人脸的尾帧作参考图不触发 `PrivacyInformation`。
+
+### 画面风格预设（`app/services/studio/style_presets.py`）
+
+- 目录 `STYLE_PRESETS`：26 个预设分三组（真人实拍 12 / 动画 7 / 艺术 7），每个带 `key`、标签、分组、粗分桶 `(visual_style, style)`、风格提示词（介质、镜头、光线、色彩、质感，不含剧情）、一句话说明与标签。`ProjectStyle` 为此新增 `动漫日常` / `动漫古风` / `艺术风格` 三个粗分桶，`_build_project_style_options` 把它们归到「动漫」。
+- `Project` 新增 `style_preset`（key，可空）与 `style_prompt`（用户补充，可空）。`resolve_style_text(project)`：预设提示词 +「；」+ 补充 → 仅补充 → 旧 `style` 枚举值；没有预设也没有补充的老作品输出与改造前完全一致。`style_label(project)`：预设名或旧题材值，创作板 `CreatorProjectRead` / 作品卡 `ProjectOverviewRead` / `ProjectRead`（计算字段）都带。
+- 所有提示词统一经 `resolve_style_text` 取值，老模板不用改——`{{ style }}` 变量直接拿到整段风格描述：关键帧（`shot_frame_prompt_tasks`）、视频提示词包（`shot_video_prompt_pack.style`，含兜底提示词与预演四宫格）、形象图（`asset_image/build_base.py`：角色按 `project_id`、场景 / 道具 / 服装经 `Project*Link` 找到首个所属作品；作品没有预设时沿用实体自身的 `style` 列）、一句话起草剧本（`run_args.style`）。实体表上的 `style` / `visual_style` 列仍存粗分桶，供筛选与老模板的 `{{ visual_style }}`。
+
+### 启动建表与补列（`app/deploy_bootstrap.py`）
+
+`ensure_schema` 以表结构指纹判断模型是否变化，变化时 `create_all` 建缺失的表，再跑 `add_missing_columns`：对比模型与库里已有表，用方言的 DDL 编译器生成列定义，`ALTER TABLE … ADD COLUMN` 补上新增的可空列或带服务端默认值的列；非空且只有 Python 侧默认值的列记 warning 跳过，留给人工迁移。项目没有 Alembic，这是新增列在老库上生效的唯一路径。
 
 ### 浏览器直传（`app/services/studio/direct_upload.py`，路由 `routes/studio/uploads.py`）
 
@@ -128,7 +141,7 @@ CreatorPage
 ### api 层
 
 - `app/api/v1/routes/studio/chapters.py`：`POST /{id}/auto-confirm`、`GET /{id}/creator-board`。
-- `app/api/v1/routes/studio/projects.py`：`GET /overview`。
+- `app/api/v1/routes/studio/projects.py`：`GET /overview`；`GET /style-options` 增加 `preset_groups` / `presets`（`StylePresetRead`）/ `default_preset`；`POST` / `PATCH` 带 `style_preset` 时校验 key（未知 → 400 `unknown style_preset`）并以预设的粗分桶覆盖 `visual_style` / `style`，再做原有的组合校验。
 - `app/api/v1/routes/studio/creator.py`（前缀 `/studio/creator`）：`PUT /shots/{id}/links`、`PUT /chapters/{cid}/entities/{type}/{id}/shots`、`POST /chapters/{cid}/entities`、`POST /entities/{type}/{id}/image-from-file`、`POST /shots/{id}/keyframe-from-file`、`POST /shots/{id}/video-from-file`、`POST /entities/character/{id}/views`（→ `task_ids`）、`POST /shots/{id}/preview-grid`（→ `task_id`）、`POST /shots/{id}/audio-from-file`、`DELETE /shots/{id}/audio`。service 抛 `CreatorInputError` → 400，其它 `ValueError`（not found）→ 404。
 - `app/api/v1/routes/film/video_request.py`：`VideoGenerationTaskRequest` 增加 `audio_file_id`；`preview-prompt` 与 `tasks/video` 都接收。
 - `app/api/v1/routes/script_processing.py`：`POST /draft-script-async`（`ScriptDraftRequest`，`idea` 2–2000 字、`target_seconds` 15–600）→ `AsyncTaskCreateRead`。
