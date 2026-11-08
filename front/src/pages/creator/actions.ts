@@ -473,7 +473,7 @@ export async function previewVideoPrompt(args: { shot: CreatorShotRead; ratio: V
  * 生成视频。不传 plan 时按「有关键帧用首帧，否则纯文字」；创作页通常由 videoPlan.ts 给出全能参考方案。
  * prompt 传入时按用户改过的提示词提交；textOnly 可强制不带任何参考图（真人参考被拒后的重试）。
  */
-export async function generateVideo(args: { shot: CreatorShotRead; ratio: VideoRatio; plan?: VideoPlan; prompt?: string | null; textOnly?: boolean }): Promise<void> {
+export async function generateVideo(args: { shot: CreatorShotRead; ratio: VideoRatio; plan?: VideoPlan; prompt?: string | null; textOnly?: boolean }): Promise<string> {
   const { shot, ratio, textOnly } = args
   let plan: VideoPlan = args.plan ?? (shot.keyframe_file_id ? { mode: 'first', images: [shot.keyframe_file_id] } : { mode: 'text_only', images: [] })
   if (textOnly) plan = { mode: 'text_only', images: [], audioFileId: plan.audioFileId }
@@ -491,6 +491,7 @@ export async function generateVideo(args: { shot: CreatorShotRead; ratio: VideoR
     },
   })
   if (!res.data?.task_id) throw new Error(res.message || '视频任务创建失败')
+  return res.data.task_id
 }
 
 /** 直传完成后登记为文件记录（Blob / S3 两条直传路径共用），返回文件 ID。 */

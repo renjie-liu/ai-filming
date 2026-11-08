@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import mimetypes
 import re
 
@@ -19,7 +20,7 @@ from app.core.task_manager import SqlAlchemyTaskStore
 from app.core.task_manager.types import TaskStatus
 from app.core.tasks import VideoGenerationTask
 from app.models.llm import Model, ModelCategoryKey, ModelSettings
-from app.models.studio import FileItem, Shot, ShotDetail, ShotFrameType
+from app.models.studio import FileItem, Shot, ShotDetail, ShotFrameImage, ShotFrameType
 from app.models.task_links import GenerationTaskLink
 from app.models.types import FileUsageKind
 from app.services.common import entity_not_found
@@ -37,6 +38,8 @@ from app.services.studio.shot_status import recompute_shot_status
 from app.services.worker.async_task_support import cancel_if_requested_async
 from app.services.worker.task_logging import log_task_event, log_task_failure
 from app.utils.files import create_file_from_url_or_b64
+
+logger = logging.getLogger(__name__)
 
 
 async def validate_shot_and_duration(db: AsyncSession, shot_id: str) -> ShotDetail:
@@ -291,11 +294,48 @@ async def persist_generated_video_to_shot(
         source_ref=f"shot:{shot_id}:generated_video",
     )
 
+    if (result.last_frame_url or "").strip():
+        try:
+            await persist_last_frame_to_shot(session, shot_id=shot_id, last_frame_url=result.last_frame_url or "")
+        except Exception as exc:  # noqa: BLE001 - 尾帧只是「承接上一镜」的加分项，拿不到不影响成片，任何异常都只记日志
+            logger.warning("video %s: could not persist last frame: %s", shot_id, exc)
+
+    return file_obj
+
+
+async def persist_last_frame_to_shot(session: AsyncSession, *, shot_id: str, last_frame_url: str) -> FileItem:
+    """把方舟返回的视频尾帧转存为文件，并写成镜头的 `last` 帧（ShotFrameImage）。
+
+    为什么存在：尾帧 URL 只有 24 小时有效；而它是「承接上一镜」的关键素材——同账号 Seedance 产物的尾帧
+    被方舟信任，下一镜把它当参考图时不会触发真人人脸拦截，能把光线、场景布置和站位接上。
+    """
+    file_obj = await create_file_from_url_or_b64(
+        session,
+        url=last_frame_url,
+        name=f"shot-{shot_id}-last-frame",
+        prefix=f"generated-images/shot_last_frame/{shot_id}",
+        httpx_timeout=120.0,
+    )
+    stmt = select(ShotFrameImage).where(ShotFrameImage.shot_detail_id == shot_id, ShotFrameImage.frame_type == ShotFrameType.last).limit(1)
+    frame = (await session.execute(stmt)).scalars().first()
+    if frame is None:
+        frame = ShotFrameImage(shot_detail_id=shot_id, frame_type=ShotFrameType.last, file_id=file_obj.id, format="jpeg")
+        session.add(frame)
+    else:
+        frame.file_id = file_obj.id
+    await session.flush()
+    await sync_usage_from_shot_context(
+        session,
+        file_id=file_obj.id,
+        shot_id=shot_id,
+        usage_kind=FileUsageKind.shot_frame,
+        source_ref=f"shot:{shot_id}:last_frame",
+    )
     return file_obj
 
 
 # 方舟输入审核拒绝某张图时的错误：`InputImageSensitiveContentDetected.PrivacyInformation: ... 'content[k]' may contain real person`
-_REJECTED_INPUT_IMAGE_RE = re.compile(r"InputImageSensitiveContentDetected\.\w+.*?'content\[(\d+)\]'", re.S)
+_REJECTED_INPUT_IMAGE_RE = re.compile(r"InputImageSensitiveContentDetected\.\w+.*?'content\[(\d+)\]'", re.DOTALL)
 _IMAGE_TAG_RE = re.compile(r"\[Image (\d+)\]")
 _FRAME_FIELDS = ("first_frame_base64", "last_frame_base64", "key_frame_base64")
 # 最多自动去掉几张被拒的图再重试（每次被拒都在生成前发生，不计费）

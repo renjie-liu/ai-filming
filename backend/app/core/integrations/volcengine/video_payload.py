@@ -36,6 +36,12 @@ def _seedance_version(model: str | None) -> tuple[int, int] | None:
     return (int(match.group(1)), int(match.group(2))) if match else None
 
 
+def supports_last_frame(model: str | None) -> bool:
+    """模型是否支持 `return_last_frame`（官方：Seedance 2.5、2.0 系列、1.5 pro、1.0 pro / pro fast）。"""
+    name = (model or "").lower()
+    return is_seedance_v2_plus(model) or bool(re.search(r"seedance-1-[05]-pro", name))
+
+
 def is_seedance_v2_plus(model: str | None) -> bool:
     """模型是否为 Seedance 2.x 及以上（按模型 ID 中的版本号判断）。"""
     version = _seedance_version(model)
@@ -127,4 +133,7 @@ def build_create_task_body(input_: VideoGenerationInput) -> dict[str, Any]:
         body["seed"] = int(input_.seed)
     if input_.watermark is not None:
         body["watermark"] = bool(input_.watermark)
+    if supports_last_frame(input_.model):
+        # 尾帧图（无水印、与视频同尺寸）用于「承接上一镜」：它是方舟受信产物，下一镜可直接作参考图而不被人脸审核拦下
+        body["return_last_frame"] = True
     return body

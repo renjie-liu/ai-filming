@@ -23,6 +23,7 @@ REQUIRED_FRAMES_BY_MODE: dict[str, tuple[ShotFrameType, ...]] = {
 REFERENCE_MODE = "reference"
 MAX_REFERENCE_IMAGES = 9
 KEYFRAME_REFERENCE_LABEL = "本镜头关键帧（构图与起始状态）"
+CONTINUITY_REFERENCE_LABEL = "上一镜结尾画面（承接光线、时间、场景布置与人物站位；本镜按新的景别与运镜重新构图）"
 _ENTITY_TYPE_LABEL = {"character": "角色", "scene": "场景", "prop": "道具", "costume": "服装"}
 _ENTITY_ORDER = {"character": 0, "scene": 1, "prop": 2, "costume": 3}
 
@@ -64,10 +65,31 @@ def entity_reference_label(*, entity_type: str, name: str, description: str | No
     return f"{label}：{desc[:60]}" if desc else label
 
 
-async def collect_reference_candidates(db: AsyncSession, *, shot_id: str) -> list[ReferenceCandidate]:
-    """按「角色 → 场景 → 道具 → 服装 → 关键帧」收集镜头可用的参考图（只取有形象图的已关联实体）。
+async def previous_shot_last_frame_file_id(db: AsyncSession, *, shot_id: str) -> str | None:
+    """同章节内上一镜（index - 1）已生成视频的尾帧文件 ID；没有上一镜或还没出片返回 None。"""
+    from app.models.studio import Shot
+
+    shot = await db.get(Shot, shot_id)
+    if shot is None or shot.index is None or shot.index <= 1:
+        return None
+    prev_stmt = select(Shot.id).where(Shot.chapter_id == shot.chapter_id, Shot.index == shot.index - 1).limit(1)
+    prev_id = (await db.execute(prev_stmt)).scalar_one_or_none()
+    if not prev_id:
+        return None
+    frame_stmt = select(ShotFrameImage.file_id).where(
+        ShotFrameImage.shot_detail_id == prev_id,
+        ShotFrameImage.frame_type == ShotFrameType.last,
+        ShotFrameImage.file_id.is_not(None),
+    ).limit(1)
+    return (await db.execute(frame_stmt)).scalar_one_or_none()
+
+
+async def collect_reference_candidates(db: AsyncSession, *, shot_id: str, include_continuity: bool = True) -> list[ReferenceCandidate]:
+    """按「角色 → 场景 → 道具 → 服装 → 上一镜尾帧 → 关键帧」收集镜头可用的参考图（只取有形象图的已关联实体）。
 
     为什么存在：全能参考模式的默认素材集与 [Image n] 说明都从这里来，预览与提交共用同一规则。
+    「上一镜尾帧」来自上一镜已生成视频的 return_last_frame：方舟信任自家 Seedance 产物，这张图带着上一镜的
+    光线、场景与人物位置，是让相邻镜头看起来像同一场戏的最便宜手段（即梦 / 可灵的首尾帧续写同理）。
     """
     overview = await get_shot_assets_overview(db, shot_id=shot_id)
     linked = [item for item in overview.items if getattr(item, "is_linked", False) and item.file_id]
@@ -85,6 +107,11 @@ async def collect_reference_candidates(db: AsyncSession, *, shot_id: str) -> lis
                 kind=str(item.type),
             )
         )
+    if include_continuity:
+        prev_last = await previous_shot_last_frame_file_id(db, shot_id=shot_id)
+        if prev_last and prev_last not in seen:
+            seen.add(prev_last)
+            out.append(ReferenceCandidate(file_id=str(prev_last), label=CONTINUITY_REFERENCE_LABEL, kind="continuity"))
     frame_stmt = select(ShotFrameImage).where(ShotFrameImage.shot_detail_id == shot_id, ShotFrameImage.frame_type == ShotFrameType.first).limit(1)
     frame = (await db.execute(frame_stmt)).scalars().first()
     if frame is not None and frame.file_id and frame.file_id not in seen:

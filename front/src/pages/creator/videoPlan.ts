@@ -15,9 +15,19 @@ export type VideoMode = 'reference' | 'first' | 'text_only'
 export type VideoReference = {
   file_id: string
   label: string
-  kind: CreatorEntityRead['type'] | 'keyframe'
+  kind: CreatorEntityRead['type'] | 'keyframe' | 'continuity'
   name: string
   thumbnail: string | null
+}
+
+/** 与后端 `CONTINUITY_REFERENCE_LABEL` 一致：上一镜已生成视频的尾帧，用来接光线、场景与站位。 */
+export const CONTINUITY_REFERENCE_LABEL = '上一镜结尾画面（承接光线、时间、场景布置与人物站位；本镜按新的景别与运镜重新构图）'
+
+/** 上一镜（index - 1）已生成视频的尾帧；没有上一镜或还没出片返回 null。 */
+export function previousShotLastFrame(shot: CreatorShotRead, board: CreatorBoardRead): { file_id: string; url: string | null } | null {
+  const prev = board.shots.find((s) => s.index === shot.index - 1)
+  if (!prev?.last_frame_file_id) return null
+  return { file_id: prev.last_frame_file_id, url: prev.last_frame_url ?? null }
 }
 
 export const MAX_VIDEO_REFERENCES = 9
@@ -25,15 +35,18 @@ export const MAX_VIDEO_REFERENCES = 9
 export const VIDEO_MODE_LABEL: Record<VideoMode, string> = { reference: '形象参考', first: '首帧图', text_only: '仅文字' }
 
 export const VIDEO_MODE_HINT: Record<VideoMode, string> = {
-  reference: '把角色 / 场景的形象图和关键帧一起给模型，提示词按 [Image n] 点名；人物最不容易换脸',
+  reference: '把角色 / 场景的形象图、上一镜结尾画面和关键帧一起给模型，提示词按 [Image n] 点名；人物最不容易换脸，相邻镜头也更接得上',
   first: '用关键帧锁定第一帧的构图，形象图不参与',
   text_only: '只按文字描述生成，不带任何参考图',
 }
 
 const TYPE_LABEL: Record<CreatorEntityRead['type'], string> = { character: '角色', scene: '场景', prop: '道具', costume: '服装' }
 
-/** 镜头可用的参考素材清单（只取有形象图的关联实体 + 角色已生成的其它视角 + 关键帧）。 */
-export function referenceCandidates(shot: CreatorShotRead, board: CreatorBoardRead): VideoReference[] {
+/**
+ * 镜头可用的参考素材清单（只取有形象图的关联实体 + 角色已生成的其它视角 + 上一镜尾帧 + 关键帧）。
+ * `continuity=false` 时不带上一镜尾帧（用户关闭「承接上一镜」或单独重做某一镜时）。
+ */
+export function referenceCandidates(shot: CreatorShotRead, board: CreatorBoardRead, continuity = true): VideoReference[] {
   const seen = new Set<string>()
   const out: VideoReference[] = []
   for (const e of linkedEntities(shot, board)) {
@@ -52,6 +65,11 @@ export function referenceCandidates(shot: CreatorShotRead, board: CreatorBoardRe
       seen.add(v.file_id)
       out.push({ file_id: v.file_id, label: `${TYPE_LABEL[e.type]}「${e.name}」${viewAngleLabel(v.view_angle)}（同一人）`, kind: e.type, name: e.name, thumbnail: v.url || null })
     }
+  }
+  const prevLast = continuity ? previousShotLastFrame(shot, board) : null
+  if (prevLast && !seen.has(prevLast.file_id)) {
+    seen.add(prevLast.file_id)
+    out.push({ file_id: prevLast.file_id, label: CONTINUITY_REFERENCE_LABEL, kind: 'continuity', name: '上一镜结尾', thumbnail: prevLast.url })
   }
   if (shot.keyframe_file_id && !seen.has(shot.keyframe_file_id)) {
     out.push({ file_id: shot.keyframe_file_id, label: '本镜头关键帧（构图与起始状态）', kind: 'keyframe', name: '关键帧', thumbnail: shot.keyframe_url })

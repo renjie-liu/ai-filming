@@ -81,6 +81,7 @@ class VideoGenerationResult(BaseModel):
     provider_task_id: str | None = Field(None, description="供应商侧任务/视频 ID（用于调试/追踪）")
     provider: ProviderKey | None = Field(None, description="供应商标识")
     status: str | None = Field(None, description="供应商任务状态")
+    last_frame_url: str | None = Field(None, description="视频尾帧图片 URL（方舟 return_last_frame；24 小时内有效，需及时转存）")
 
     @model_validator(mode="after")
     def require_url_or_file_id(self) -> VideoGenerationResult:

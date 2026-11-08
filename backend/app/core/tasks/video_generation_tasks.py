@@ -177,6 +177,7 @@ class VolcengineVideoGenerationTask(AbstractVideoGenerationTask):
         base_url = (self._cfg.base_url or "https://ark.cn-beijing.volces.com/api/v3").rstrip("/")
         status_val = ""
         video_url: str | None = None
+        last_frame_url: str | None = None
         while True:
             meta = await self._adapter.get_contents_task(
                 cfg=self._cfg,
@@ -189,6 +190,9 @@ class VolcengineVideoGenerationTask(AbstractVideoGenerationTask):
                 vu = content.get("video_url")
                 if isinstance(vu, str) and vu:
                     video_url = vu
+                lf = content.get("last_frame_url")
+                if isinstance(lf, str) and lf:
+                    last_frame_url = lf
             if status_val in ("succeeded", "failed", "cancelled"):
                 if status_val != "succeeded":
                     # 保留方舟错误码与说明（如生成后审核拦截），便于前端给出准确的中文原因。
@@ -205,6 +209,7 @@ class VolcengineVideoGenerationTask(AbstractVideoGenerationTask):
             provider_task_id=task_id,
             provider="volcengine",
             status=status_val or "succeeded",
+            last_frame_url=last_frame_url,
         )
 
 

@@ -1,13 +1,14 @@
 import type React from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Checkbox, Drawer, Input, Popconfirm, Progress, Segmented, Table, Tag, message } from 'antd'
+import { Button, Card, Checkbox, Drawer, Input, Popconfirm, Progress, Segmented, Switch, Table, Tag, message } from 'antd'
+import { StudioChaptersService } from '../../../services/generated'
 import type { CreatorBoardRead, CreatorShotRead } from '../../../services/generated'
 import { useIsMobile } from '../../../hooks/useIsMobile'
 import { localizeErrorMessage } from '../../../utils/errorMessage'
 import { clearShotAudio, generateVideo, isRealPersonRejection, previewVideoPrompt, resolveRatio, uploadShotAudio, uploadShotVideo, type VideoPlan, type VideoRatio } from '../actions'
 import ImagePickButton from '../ImagePickButton'
 import { ArtBox, DurationBadge, IndexBadge, TaskTag, taskErrorText } from '../ui'
-import { isActiveStatus } from '../taskPolling'
+import { isActiveStatus, pollTask } from '../taskPolling'
 import { VIDEO_MODE_HINT, VIDEO_MODE_LABEL, defaultVideoMode, describeVideoMode, referenceCandidates, type VideoMode } from '../videoPlan'
 
 /**
@@ -35,10 +36,10 @@ export function videoStarted(board: CreatorBoardRead): boolean {
 }
 
 /** 把「模式 + 勾选的素材」变成提交方案；素材不够时自动降级（形象参考 → 首帧 → 仅文字）。 */
-function planFor(shot: CreatorShotRead, board: CreatorBoardRead, mode: VideoMode, selected?: string[]): VideoPlan {
+function planFor(shot: CreatorShotRead, board: CreatorBoardRead, mode: VideoMode, selected?: string[], continuity = true): VideoPlan {
   const audioFileId = shot.audio_file_id ?? null
   if (mode === 'reference') {
-    const refs = referenceCandidates(shot, board).filter((r) => !selected || selected.includes(r.file_id))
+    const refs = referenceCandidates(shot, board, continuity).filter((r) => !selected || selected.includes(r.file_id))
     if (refs.length > 0) return { mode: 'reference', images: refs.map((r) => r.file_id), labels: refs.map((r) => r.label), audioFileId }
   }
   if (mode !== 'text_only' && shot.keyframe_file_id) return { mode: 'first', images: [shot.keyframe_file_id], audioFileId }
@@ -241,6 +242,9 @@ const VideoDrawer: React.FC<{
 
 const VideoStep: React.FC<Props> = ({ board, onBack, onFinal, onTaskStarted, onChanged, onEditShot, startRef }) => {
   const [starting, setStarting] = useState(false)
+  // 承接上一镜：逐镜顺序生成，把上一镜已出片的尾帧作为下一镜的参考图（光线 / 场景 / 站位接得上）；关闭则并发生成
+  const [chain, setChain] = useState(true)
+  const [progressNote, setProgressNote] = useState<string | null>(null)
   const [retrying, setRetrying] = useState<Record<string, boolean>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
   const editing = useMemo(() => board.shots.find((s) => s.id === editingId) ?? null, [board.shots, editingId])
@@ -252,24 +256,62 @@ const VideoStep: React.FC<Props> = ({ board, onBack, onFinal, onTaskStarted, onC
     const forceText = textOnly || isRealPersonRejection(shot.video_task?.error)
     await generateVideo({ shot, ratio, plan: planFor(shot, board, defaultVideoMode(shot, board)), textOnly: forceText })
   }
+  /**
+   * 逐镜顺序生成：每一镜等上一镜出片、刷新一次创作板，再带着上一镜的尾帧提交下一镜。
+   * 为什么要串行：尾帧只有在上一镜成功后才存在；而且同时跑太多镜头会撞上服务端函数的 5 分钟上限。
+   */
+  const startSequential = async (todo: CreatorShotRead[]): Promise<number> => {
+    let failed = 0
+    let current = board
+    for (let i = 0; i < todo.length; i += 1) {
+      const shot = current.shots.find((x) => x.id === todo[i].id) ?? todo[i]
+      setProgressNote(`正在生成第 ${i + 1}/${todo.length} 镜「${shot.title}」${i > 0 ? '，承接上一镜结尾画面' : ''}`)
+      try {
+        const forceText = isRealPersonRejection(shot.video_task?.error)
+        const taskId = await generateVideo({ shot, ratio, plan: planFor(shot, current, defaultVideoMode(shot, current)), textOnly: forceText })
+        onTaskStarted()
+        const settled = await pollTask(taskId, { intervalMs: 4000, timeoutMs: 12 * 60 * 1000 })
+        if (settled.status !== 'succeeded') {
+          failed += 1
+          message.warning(`${shot.title}：${errText(settled.error ?? '', '生成失败')}，继续下一镜`)
+        }
+      } catch (e) {
+        failed += 1
+        message.error(`${shot.title}：${errText(e, '视频任务创建失败')}`)
+      }
+      try {
+        const res = await StudioChaptersService.getCreatorBoardApiApiV1StudioChaptersChapterIdCreatorBoardGet({ chapterId: board.chapter.id })
+        if (res.data) current = res.data
+      } catch {
+        /* 刷新失败就沿用旧板，只是拿不到最新尾帧 */
+      }
+    }
+    setProgressNote(null)
+    return failed
+  }
+
   const startAll = async () => {
-    const todo = board.shots.filter((s) => !s.video_file_id && !(s.video_task && isActiveStatus(s.video_task.status)))
+    const todo = board.shots.filter((s) => !s.video_file_id && !(s.video_task && isActiveStatus(s.video_task.status))).sort((a, b) => a.index - b.index)
     if (todo.length === 0) {
       message.info('所有镜头都已生成或正在生成')
       return
     }
     setStarting(true)
     let failed = 0
-    for (const s of todo) {
-      try {
-        await runOne(s)
-      } catch (e) {
-        failed += 1
-        message.error(`${s.title}：${errText(e, '视频任务创建失败')}`)
+    if (chain) {
+      failed = await startSequential(todo)
+    } else {
+      for (const s of todo) {
+        try {
+          await generateVideo({ shot: s, ratio, plan: planFor(s, board, defaultVideoMode(s, board), undefined, false), textOnly: isRealPersonRejection(s.video_task?.error) })
+        } catch (e) {
+          failed += 1
+          message.error(`${s.title}：${errText(e, '视频任务创建失败')}`)
+        }
       }
     }
     onTaskStarted()
-    if (failed === 0) message.success(`已开始生成 ${todo.length} 段视频`)
+    if (failed === 0) message.success(chain ? `${todo.length} 段视频已按顺序生成完成` : `已开始生成 ${todo.length} 段视频`)
     setStarting(false)
   }
   if (startRef) startRef.current = () => void startAll()
@@ -300,7 +342,7 @@ const VideoStep: React.FC<Props> = ({ board, onBack, onFinal, onTaskStarted, onC
           <h1 className="text-xl font-bold m-0">{started ? '生成视频' : '确认后开始生成'}</h1>
           <p className="text-gray-500 text-sm m-0 mt-1 max-w-[60ch]">
             {started
-              ? '每个镜头单独生成；失败的镜头会给出原因，可以单独重试或上传自己的视频，不影响其他镜头。'
+              ? progressNote ?? '每个镜头单独生成；失败的镜头会给出原因，可以单独重试或上传自己的视频，不影响其他镜头。'
               : '生成前先确认一遍，额度只在你点「开始生成」之后才消耗。点「调整」可以改参考方式和提示词。'}
           </p>
         </div>
@@ -341,8 +383,15 @@ const VideoStep: React.FC<Props> = ({ board, onBack, onFinal, onTaskStarted, onC
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-gray-500 mt-3">
             <span>共 <b className="text-gray-900 font-medium tabular-nums">{board.summary.total_seconds} 秒</b></span>
             <span>比例 <b className="text-gray-900 font-medium">{ratio}</b></span>
-            <span>预计 <b className="text-gray-900 font-medium">{Math.max(2, Math.ceil(board.shots.length * 0.8))}–{Math.max(4, board.shots.length * 2)} 分钟</b></span>
+            <span>预计 <b className="text-gray-900 font-medium">{chain ? `${Math.max(3, Math.ceil(board.shots.length * 2.5))}–${Math.max(5, board.shots.length * 3)}` : `${Math.max(2, Math.ceil(board.shots.length * 0.8))}–${Math.max(4, board.shots.length * 2)}`} 分钟</b></span>
             {referenceShots > 0 && <span>{referenceShots} 个镜头带形象参考</span>}
+          </div>
+          <div className="flex items-start gap-2 mt-3 text-[13px]">
+            <Switch size="small" checked={chain} onChange={setChain} className="mt-0.5" />
+            <span>
+              <b className="font-medium text-gray-900">承接上一镜</b>
+              <span className="text-gray-500">：按顺序一镜一镜生成，把上一镜的结尾画面交给下一镜当参考，光线、场景和站位能接上，整集看起来像同一场戏；代价是要等前一镜出片，总时间更长。关掉则所有镜头同时开跑。</span>
+            </span>
           </div>
           <div className="flex flex-wrap items-center gap-3 mt-4">
             <Button type="primary" size="large" loading={starting} onClick={() => void startAll()} disabled={board.shots.length === 0}>开始生成</Button>

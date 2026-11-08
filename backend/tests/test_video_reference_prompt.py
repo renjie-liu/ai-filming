@@ -8,9 +8,11 @@ from fastapi import HTTPException
 from app.core.contracts.video_generation import VideoGenerationInput
 from app.core.integrations.volcengine.video_payload import (
     build_content,
+    build_create_task_body,
+    supports_last_frame,
     to_image_url_value,
 )
-from app.models.studio import FileItem, FileType
+from app.models.studio import FileItem, FileType, ShotFrameImage, ShotFrameType
 from app.schemas.studio.shots import ShotPromptCameraInfo
 from app.services.film.generated_video import preview_prompt_and_images
 from app.services.studio.creator_flow import (
@@ -25,6 +27,7 @@ from app.services.studio.generation.video import (
     resolve_video_reference_images,
     validate_images_count,
 )
+from app.services.studio.generation.video.build_context import CONTINUITY_REFERENCE_LABEL, previous_shot_last_frame_file_id
 from app.services.studio.generation.video.derive_preview import (
     REFERENCE_BLOCK_HEADER,
     prepend_reference_block,
@@ -139,4 +142,56 @@ async def test_reference_candidates_and_preview_prompt() -> None:
         # 帧模式不受影响
         prompt4, images4, _p4, labels4 = await preview_prompt_and_images(db, shot_id="s1", reference_mode="first", prompt=None)
         assert images4 == ["f-frame"] and labels4 == [] and "[Image 1]" not in prompt4
+    await engine.dispose()
+
+
+def test_return_last_frame_requested_for_supported_seedance_models() -> None:
+    assert supports_last_frame("dreamina-seedance-2-5-260628") and supports_last_frame("seedance-1-5-pro-251215") and supports_last_frame("seedance-1-0-pro-fast-251015")
+    assert not supports_last_frame("seedance-1-0-lite-t2v-250428") and not supports_last_frame(None)
+    body = build_create_task_body(VideoGenerationInput(prompt="p", model="dreamina-seedance-2-5-260628", ratio="9:16", seconds=4))
+    assert body["return_last_frame"] is True
+    body_lite = build_create_task_body(VideoGenerationInput(prompt="p", model="seedance-1-0-lite-t2v-250428", ratio="9:16", seconds=5))
+    assert "return_last_frame" not in body_lite
+
+
+@pytest.mark.asyncio
+async def test_previous_shot_last_frame_joins_reference_candidates() -> None:
+    """上一镜出片后，它的尾帧排在实体形象图之后、本镜关键帧之前；可关闭；第一镜没有「上一镜」。"""
+    db, engine = await _build_session()
+    async with db:
+        await _seed(db)
+        await auto_confirm_chapter(db, chapter_id="c1")
+        board = await build_creator_board(db, chapter_id="c1")
+        character = next(e for e in board.entities if e.type == "character")
+        db.add_all(
+            [
+                FileItem(id="f-face", type=FileType.image, name="face.jpg", thumbnail="https://blob/face.jpg", tags=[], storage_key="files/a/face.jpg"),
+                FileItem(id="f-last1", type=FileType.image, name="last.jpg", thumbnail="https://blob/last1.jpg", tags=[], storage_key="files/l/last1.jpg"),
+                FileItem(id="f-frame2", type=FileType.image, name="frame2.png", thumbnail="https://blob/frame2.png", tags=[], storage_key="files/c/frame2.png"),
+            ]
+        )
+        await db.flush()
+        await attach_entity_image(db, entity_type="character", entity_id=character.id, file_id="f-face")
+        await attach_shot_keyframe(db, shot_id="s2", file_id="f-frame2")
+        assert await previous_shot_last_frame_file_id(db, shot_id="s2") is None
+        assert await previous_shot_last_frame_file_id(db, shot_id="s1") is None  # 第一镜没有上一镜
+        db.add(ShotFrameImage(shot_detail_id="s1", frame_type=ShotFrameType.last, file_id="f-last1", format="jpeg"))
+        await db.flush()
+        assert await previous_shot_last_frame_file_id(db, shot_id="s2") == "f-last1"
+
+        candidates = await collect_reference_candidates(db, shot_id="s2")
+        kinds = [c.kind for c in candidates]
+        assert "f-last1" in [c.file_id for c in candidates]
+        assert kinds.index("continuity") < kinds.index("keyframe")
+        assert all(kinds.index(k) < kinds.index("continuity") for k in kinds if k not in ("continuity", "keyframe"))
+        assert next(c for c in candidates if c.kind == "continuity").label == CONTINUITY_REFERENCE_LABEL
+        without = await collect_reference_candidates(db, shot_id="s2", include_continuity=False)
+        assert "f-last1" not in [c.file_id for c in without]
+
+        board = await build_creator_board(db, chapter_id="c1")
+        s1 = next(s for s in board.shots if s.id == "s1")
+        assert s1.last_frame_file_id == "f-last1" and s1.last_frame_url == "https://blob/last1.jpg"
+        prompt, images, _pack, labels = await preview_prompt_and_images(db, shot_id="s2", reference_mode=REFERENCE_MODE, prompt=None)
+        assert "f-last1" in images and any(label == CONTINUITY_REFERENCE_LABEL for label in labels)
+        assert "上一镜结尾画面" in prompt
     await engine.dispose()
