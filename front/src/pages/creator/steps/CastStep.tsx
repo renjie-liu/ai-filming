@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Drawer, Empty, Input, Modal, Popconfirm, Segmented, Select, Tag, message } from 'antd'
+import { Alert, Button, Card, Drawer, Empty, Input, Modal, Popconfirm, Segmented, Select, Tag, Tooltip, message } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import type { CreatorBoardRead, CreatorEntityRead } from '../../../services/generated'
 import { useIsMobile } from '../../../hooks/useIsMobile'
@@ -9,6 +9,7 @@ import {
   adoptEntityImage,
   createEntity,
   deleteEntity,
+  entitiesAwaitingImage,
   generateCharacterViews,
   generateEntityImage,
   generateEntityImages,
@@ -28,6 +29,9 @@ import { isActiveStatus } from '../taskPolling'
  * 每张卡可以：AI 生成形象（一次 1–4 张候选，提示词可先看可改）、在历史候选里挑一张 / 回退、上传自己的图、
  * 改名称 / 设定、选它出现在哪些镜头、删除；角色还能以正面形象派生侧面 / 背面（三视图），转身镜头不换脸。
  * 也可以手动新增角色 / 场景 / 道具。其它集建过档的实体也会列出（标「本集未用到」），方便沿用。
+ *
+ * 形象图是关键帧与视频的前置条件：本集用到的实体还有没形象的，主按钮就是「全部生成形象」，「去分镜板」降为次按钮；
+ * 都有图后主按钮才变成「下一步」。
  */
 
 const COUNT_OPTIONS = [1, 2, 4].map((n) => ({ value: n, label: `${n} 张` }))
@@ -37,6 +41,9 @@ type Props = {
   onNext: () => void
   onTaskStarted: () => void
   onChanged: () => Promise<void> | void
+  /** 导演助手的主按钮通过它触发「全部生成形象」 */
+  batchRef?: React.MutableRefObject<(() => void) | null>
+  onRunningChange?: (running: boolean) => void
 }
 
 const errText = (e: unknown, fallback: string) => localizeErrorMessage(e instanceof Error ? e.message : String(e), fallback)
@@ -377,8 +384,11 @@ const AddEntityModal: React.FC<{
   )
 }
 
-const CastStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChanged }) => {
+const CastStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChanged, batchRef, onRunningChange }) => {
   const [batchRunning, setBatchRunning] = useState(false)
+  useEffect(() => {
+    onRunningChange?.(batchRunning)
+  }, [batchRunning, onRunningChange])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [adding, setAdding] = useState<CreatorEntityType | null>(null)
   const editing = useMemo(() => board.entities.find((e) => e.id === editingId) ?? null, [board.entities, editingId])
@@ -392,7 +402,7 @@ const CastStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChanged }) 
     }
   }
   // 批量只管本集用到的实体；沿用自其它集但本集未选镜头的不生成
-  const todoAll = board.entities.filter((e) => e.shot_count > 0 && !e.thumbnail && !(e.image_task && isActiveStatus(e.image_task.status)))
+  const todoAll = entitiesAwaitingImage(board)
   const generateAll = async () => {
     if (todoAll.length === 0) return
     setBatchRunning(true)
@@ -402,6 +412,7 @@ const CastStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChanged }) 
       setBatchRunning(false)
     }
   }
+  if (batchRef) batchRef.current = () => void generateAll()
   const groups = (['character', 'scene', 'prop', 'costume'] as const)
     .map((t) => ({ type: t, items: board.entities.filter((e) => e.type === t) }))
     .filter((g) => g.items.length > 0)
@@ -416,13 +427,32 @@ const CastStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChanged }) 
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => void generateAll()} loading={batchRunning} disabled={todoAll.length === 0}>
-            全部生成形象 · {todoAll.length} 张图
-          </Button>
-          <Button icon={<PlusOutlined />} onClick={() => setAdding('character')}>新增</Button>
-          <Button type="primary" onClick={onNext}>下一步：分镜板</Button>
+          {todoAll.length > 0 ? (
+            <>
+              <Button type="primary" onClick={() => void generateAll()} loading={batchRunning} data-testid="cast-generate-all">
+                全部生成形象 · {todoAll.length} 张图
+              </Button>
+              <Button icon={<PlusOutlined />} onClick={() => setAdding('character')}>新增</Button>
+              <Tooltip title="没有形象图的角色，关键帧和视频里的长相会随机变化">
+                <Button onClick={onNext}>跳过，去分镜板</Button>
+              </Tooltip>
+            </>
+          ) : (
+            <>
+              <Button icon={<PlusOutlined />} onClick={() => setAdding('character')}>新增</Button>
+              <Button type="primary" onClick={onNext}>下一步：分镜板</Button>
+            </>
+          )}
         </div>
       </div>
+      {todoAll.length > 0 && (
+        <Alert
+          type="info"
+          showIcon
+          message={`还有 ${todoAll.length} 个本集用到的角色 / 场景 / 道具没有形象图：${todoAll.slice(0, 5).map((e) => e.name).join('、')}${todoAll.length > 5 ? '…' : ''}`}
+          description="先定下形象再出关键帧，关键帧和之后的视频里的人物才是同一个。都有图后，这一步的主按钮会变成「下一步：分镜板」。"
+        />
+      )}
       {groups.length === 0 && (
         <Empty description="剧本里没有识别出角色或场景">
           <Button type="primary" onClick={() => setAdding('character')}>手动新增一个</Button>

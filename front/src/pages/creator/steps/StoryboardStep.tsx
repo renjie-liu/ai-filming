@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Drawer, Empty, Input, InputNumber, Popconfirm, Select, Tag, message } from 'antd'
+import { Alert, Button, Card, Drawer, Empty, Input, InputNumber, Popconfirm, Select, Tag, message } from 'antd'
 import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined } from '@ant-design/icons'
 import type { CreatorBoardRead, CreatorEntityRead, CreatorShotRead } from '../../../services/generated'
 import { useIsMobile } from '../../../hooks/useIsMobile'
@@ -9,9 +9,13 @@ import {
   addShot,
   adoptShotKeyframe,
   deleteShot,
+  entitiesAwaitingImage,
+  entitiesImageInFlight,
+  generateEntityImage,
   generateKeyframe,
   generatePreviewGrid,
   linkedEntities,
+  waitForEntityImages,
   reorderShots,
   resolveRatio,
   rewriteShotDescription,
@@ -33,6 +37,9 @@ import { isActiveStatus } from '../taskPolling'
  * 画面描述（AI 改写）、时长、画面里会用到的角色 / 场景 / 道具、对白，也可以上传自己的图当关键帧，
  * 并在生视频前先出一张「预演四宫格」（2×2 图演四个节拍）检查节奏与连续性。
  * 镜头顺序：桌面端直接拖卡片；抽屉里的「上移 / 下移」在手机上也能用。
+ *
+ * 形象图是关键帧的前置条件：还没有关键帧的镜头里用到的实体若没有形象图，顶部给出提示，
+ * 「生成全部关键帧」会先补齐这些形象图、等它们出图后再按最新的板出关键帧（参考图才带得上）。
  */
 
 /** 把 dragged 移到 target 的位置（target 之前），返回新的 id 顺序。 */
@@ -53,6 +60,7 @@ type Props = {
   onTaskStarted: () => void
   onChanged: () => Promise<void> | void
   batchRef?: React.MutableRefObject<(() => void) | null>
+  onBackToCast?: () => void
 }
 
 const errText = (e: unknown, fallback: string) => localizeErrorMessage(e instanceof Error ? e.message : String(e), fallback)
@@ -149,7 +157,7 @@ function speakerValue(d: DialogueDraft): string {
   return d.speakerName ? `name:${d.speakerName}` : ''
 }
 
-const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChanged, batchRef }) => {
+const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChanged, batchRef, onBackToCast }) => {
   const isMobile = useIsMobile()
   const [editingId, setEditingId] = useState<string | null>(null)
   const editing = useMemo(() => board.shots.find((s) => s.id === editingId) ?? null, [board.shots, editingId])
@@ -167,6 +175,7 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
   const [generating, setGenerating] = useState(false)
   const [gridRunning, setGridRunning] = useState(false)
   const [batchRunning, setBatchRunning] = useState(false)
+  const [progressNote, setProgressNote] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
   const [reordering, setReordering] = useState(false)
@@ -188,22 +197,51 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId])
 
-  const generate = async (shot: CreatorShotRead) => {
+  /** 出一张关键帧；`source` 可传更新过的板（形象图刚出来时），参考图按它取。 */
+  const generate = async (shot: CreatorShotRead, source: CreatorBoardRead = board) => {
     try {
-      await generateKeyframe({ shot, board, ratio })
+      await generateKeyframe({ shot, board: source, ratio })
       onTaskStarted()
     } catch (e) {
       message.error(errText(e, '关键帧生成失败'))
     }
   }
-  const generateAll = async () => {
-    const todo = board.shots.filter((s) => !s.keyframe_url && !keyframeActive(s))
+  const pendingShots = (source: CreatorBoardRead) => source.shots.filter((s) => !s.keyframe_url && !keyframeActive(s))
+  /**
+   * 批量出关键帧。默认先把这些镜头用到的、还没形象图的实体补齐并等出图，再按最新的板出关键帧；
+   * `skipImages` 为 true 时跳过前置，直接出（用户明确选择「不等形象」）。
+   */
+  const generateAll = async (skipImages = false) => {
+    let current = board
+    let todo = pendingShots(current)
     if (todo.length === 0) return
     setBatchRunning(true)
     try {
-      for (const s of todo) await generate(s)
+      const shotIds = new Set(todo.map((s) => s.id))
+      const need = skipImages ? [] : entitiesAwaitingImage(current, shotIds)
+      const inFlightNow = skipImages ? [] : entitiesImageInFlight(current, shotIds)
+      if (need.length > 0 || inFlightNow.length > 0) {
+        setProgressNote(`先生成 ${need.length} 张形象图，完成后再出关键帧…`)
+        for (const e of need) {
+          try {
+            await generateEntityImage(e)
+          } catch (err) {
+            message.warning(`${e.name}：${errText(err, '形象生成失败')}，先跳过`)
+          }
+        }
+        onTaskStarted()
+        const fresh = await waitForEntityImages(current.chapter.id, [...need, ...inFlightNow].map((e) => e.id), {
+          onProgress: (done, total) => setProgressNote(`形象图 ${done}/${total} 已完成，全部完成后开始出关键帧…`),
+        })
+        if (fresh) current = fresh
+        await onChanged()
+        todo = pendingShots(current)
+      }
+      setProgressNote(`正在提交 ${todo.length} 张关键帧…`)
+      for (const s of todo) await generate(s, current)
     } finally {
       setBatchRunning(false)
+      setProgressNote(null)
     }
   }
   if (batchRef) batchRef.current = () => void generateAll()
@@ -353,6 +391,9 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
     .map((t) => ({ label: ENTITY_TYPE_LABEL[t], options: board.entities.filter((e) => e.type === t).map((e) => ({ value: e.id, label: e.name })) }))
     .filter((g) => g.options.length > 0)
   const missing = board.shots.filter((s) => !s.keyframe_url).length
+  const pendingIds = new Set(pendingShots(board).map((s) => s.id))
+  const awaiting = entitiesAwaitingImage(board, pendingIds)
+  const inFlight = entitiesImageInFlight(board, pendingIds)
   const liveError = editing && !editing.keyframe_url ? taskErrorText(editing.keyframe_image_task) ?? taskErrorText(editing.keyframe_prompt_task) : null
 
   return (
@@ -365,13 +406,34 @@ const StoryboardStep: React.FC<Props> = ({ board, onNext, onTaskStarted, onChang
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => void generateAll()} loading={batchRunning} disabled={missing === 0}>
-            生成全部关键帧 · {missing} 张图
+          <Button onClick={() => void generateAll()} loading={batchRunning} disabled={missing === 0} data-testid="storyboard-generate-all">
+            {awaiting.length > 0 ? `先生成形象再出关键帧 · ${awaiting.length + missing} 张图` : `生成全部关键帧 · ${missing} 张图`}
           </Button>
           <Button type="text" onClick={() => void add()}>+ 添加镜头</Button>
           <Button type="primary" onClick={onNext}>下一步：生成视频</Button>
         </div>
       </div>
+      {missing > 0 && (awaiting.length > 0 || inFlight.length > 0) ? (
+        <Alert
+          type="warning"
+          showIcon
+          data-testid="keyframe-prerequisite"
+          message={
+            awaiting.length > 0
+              ? `有 ${awaiting.length} 个角色 / 场景 / 道具还没有形象图：${awaiting.slice(0, 5).map((e) => e.name).join('、')}${awaiting.length > 5 ? '…' : ''}`
+              : `有 ${inFlight.length} 个角色 / 场景 / 道具的形象图正在生成`
+          }
+          description={progressNote ?? '先定下形象再出关键帧，关键帧和之后的视频里的人物才是同一个。「生成全部关键帧」会先补齐这些形象图、等它们完成后再出关键帧。'}
+          action={
+            <div className="flex flex-col gap-1 items-stretch">
+              {onBackToCast && <Button size="small" onClick={onBackToCast}>回到角色场景</Button>}
+              <Button size="small" type="text" onClick={() => void generateAll(true)} disabled={batchRunning}>不等形象，直接出关键帧</Button>
+            </div>
+          }
+        />
+      ) : progressNote ? (
+        <Alert type="info" showIcon message={progressNote} />
+      ) : null}
       {board.shots.length === 0 ? (
         <Empty description="还没有镜头，先回到「剧本」一键拆分镜" />
       ) : (

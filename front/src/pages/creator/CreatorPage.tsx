@@ -11,6 +11,7 @@ import DirectorRail, { STEP_TIPS, type RailPrimary } from './DirectorRail'
 import StepBar from './StepBar'
 import { CREATOR_STEPS, WORKS_PATH, isCreatorStepKey, type CreatorStepKey } from './routes'
 import { useCreatorBoard } from './useCreatorBoard'
+import { entitiesAwaitingImage } from './actions'
 import CastStep from './steps/CastStep'
 import FinalStep from './steps/FinalStep'
 import ScriptStep from './steps/ScriptStep'
@@ -25,10 +26,15 @@ import type { CreatorBoardRead } from '../../services/generated'
  * 始终告诉用户下一步做什么。步骤通过 URL hash 记录（#script / #cast / ...），章节通过 ?chapter=。
  */
 
-function defaultStep(board: CreatorBoardRead | null): CreatorStepKey {
+/**
+ * 打开作品时落在哪一步：按进度推断。
+ * 形象图是关键帧的前置条件，所以镜头里用到的角色还有没形象的，就先停在「角色场景」，哪怕已经出过关键帧。
+ */
+export function defaultStep(board: CreatorBoardRead | null): CreatorStepKey {
   if (!board || board.summary.shot_count === 0) return 'script'
   if (board.summary.video_done_count > 0 && board.summary.video_done_count === board.summary.shot_count) return 'final'
   if (videoStarted(board)) return 'video'
+  if (entitiesAwaitingImage(board).some((e) => e.type === 'character')) return 'cast'
   if (board.summary.keyframe_count > 0) return 'storyboard'
   return 'cast'
 }
@@ -116,9 +122,11 @@ const CreatorPage: React.FC = () => {
   )
 
   const scriptTrigger = useRef<(() => void) | null>(null)
+  const castBatch = useRef<(() => void) | null>(null)
   const storyboardBatch = useRef<(() => void) | null>(null)
   const videoStart = useRef<(() => void) | null>(null)
   const [scriptRunning, setScriptRunning] = useState(false)
+  const [castRunning, setCastRunning] = useState(false)
 
   const switchChapter = (chapterId: string) => {
     setSearchParams((prev) => {
@@ -152,8 +160,13 @@ const CreatorPage: React.FC = () => {
         return hasShots
           ? { label: '去分镜板', onClick: () => setStep('storyboard') }
           : { label: '一键拆分镜', onClick: () => scriptTrigger.current?.(), loading: scriptRunning }
-      case 'cast':
-        return { label: '下一步：分镜板', onClick: () => setStep('storyboard') }
+      case 'cast': {
+        // 还有本集用到的实体没形象时，主按钮是生成形象而不是跳过
+        const todo = board ? entitiesAwaitingImage(board).length : 0
+        return todo > 0
+          ? { label: `全部生成形象 · ${todo} 张图`, onClick: () => castBatch.current?.(), loading: castRunning }
+          : { label: '下一步：分镜板', onClick: () => setStep('storyboard') }
+      }
       case 'storyboard':
         return { label: '下一步：生成视频', onClick: () => setStep('video'), disabled: !hasShots }
       case 'video':
@@ -215,9 +228,9 @@ const CreatorPage: React.FC = () => {
     }
     switch (step) {
       case 'cast':
-        return <CastStep board={board} onNext={() => setStep('storyboard')} onTaskStarted={pollSoon} onChanged={refresh} />
+        return <CastStep board={board} onNext={() => setStep('storyboard')} onTaskStarted={pollSoon} onChanged={refresh} batchRef={castBatch} onRunningChange={setCastRunning} />
       case 'storyboard':
-        return <StoryboardStep board={board} onNext={() => setStep('video')} onTaskStarted={pollSoon} onChanged={refresh} batchRef={storyboardBatch} />
+        return <StoryboardStep board={board} onNext={() => setStep('video')} onTaskStarted={pollSoon} onChanged={refresh} batchRef={storyboardBatch} onBackToCast={() => setStep('cast')} />
       case 'video':
         return <VideoStep board={board} onBack={() => setStep('storyboard')} onFinal={() => setStep('final')} onTaskStarted={pollSoon} onChanged={refresh} onEditShot={() => setStep('storyboard')} startRef={videoStart} />
       case 'final':

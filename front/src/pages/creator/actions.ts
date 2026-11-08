@@ -25,7 +25,7 @@ import type {
   VideoGenerationTaskRequest,
 } from '../../services/generated'
 import { downscaleImage } from '../../utils/imageResize'
-import { assertSucceeded, pollTask } from './taskPolling'
+import { assertSucceeded, isActiveStatus, pollTask, sleep } from './taskPolling'
 
 /**
  * 创作页的业务动作：把多个后端任务串成用户眼中的「一步」。
@@ -628,4 +628,60 @@ export async function saveShot(args: {
 
 export async function deleteShot(shotId: string): Promise<void> {
   await StudioShotsService.deleteShotApiV1StudioShotsShotIdDelete({ shotId })
+}
+
+/** 实体是否被这些镜头用到；不给 `shotIds` 时看它在本集是否至少出现在一个镜头里。 */
+function usedByShots(entity: CreatorEntityRead, shotIds?: Set<string>): boolean {
+  if (!shotIds) return entity.shot_count > 0
+  return entity.shot_ids.some((id) => shotIds.has(id))
+}
+
+/**
+ * 本集镜头会用到、但还没有形象图、也没有正在生成的实体。
+ *
+ * 为什么存在：关键帧和视频都以实体形象图为参考，形象图是它们的前置条件。角色场景步的「全部生成形象」、
+ * 分镜步的前置提示与串行生成、创作页打开时的默认步骤都用这一个口径，避免三处各算一套。
+ * `shotIds` 给出时只看这些镜头用到的实体（例如只看还没有关键帧的镜头）。
+ */
+export function entitiesAwaitingImage(board: CreatorBoardRead, shotIds?: Set<string>): CreatorEntityRead[] {
+  return board.entities.filter((e) => usedByShots(e, shotIds) && !e.thumbnail && !(e.image_task && isActiveStatus(e.image_task.status)))
+}
+
+/** 这些镜头用到的、形象图正在生成中（已发任务还没出图）的实体。 */
+export function entitiesImageInFlight(board: CreatorBoardRead, shotIds?: Set<string>): CreatorEntityRead[] {
+  return board.entities.filter((e) => usedByShots(e, shotIds) && !e.thumbnail && !!e.image_task && isActiveStatus(e.image_task.status))
+}
+
+/**
+ * 等这些实体的形象图任务结束（出图或失败），期间定时重拉创作板，返回最新的板（拉取一直失败时为 null）。
+ *
+ * 用于「先生成形象再出关键帧」的串行：关键帧任务要拿到形象图的 file_id 才有参考，所以必须等图真的出来。
+ * 任务失败的实体不再等待，关键帧照常出，只是少一张参考。
+ */
+export async function waitForEntityImages(
+  chapterId: string,
+  entityIds: string[],
+  options: { intervalMs?: number; timeoutMs?: number; onProgress?: (done: number, total: number) => void } = {},
+): Promise<CreatorBoardRead | null> {
+  const intervalMs = options.intervalMs ?? 4000
+  const timeoutMs = options.timeoutMs ?? 8 * 60 * 1000
+  const wanted = new Set(entityIds)
+  const started = Date.now()
+  let latest: CreatorBoardRead | null = null
+  for (;;) {
+    await sleep(intervalMs)
+    try {
+      const res = await StudioChaptersService.getCreatorBoardApiApiV1StudioChaptersChapterIdCreatorBoardGet({ chapterId })
+      if (res.data) latest = res.data
+    } catch {
+      /* 一次刷新失败不中断等待 */
+    }
+    if (latest) {
+      const tracked = latest.entities.filter((e) => wanted.has(e.id))
+      const pending = tracked.filter((e) => !e.thumbnail && e.image_task && isActiveStatus(e.image_task.status))
+      options.onProgress?.(tracked.length - pending.length, tracked.length)
+      if (pending.length === 0) return latest
+    }
+    if (Date.now() - started > timeoutMs) return latest
+  }
 }

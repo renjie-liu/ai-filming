@@ -26,6 +26,8 @@ CreatorPage
 数据来源只有一个：`useCreatorBoard(chapterId)` 轮询 `GET /api/v1/studio/chapters/{id}/creator-board`。
 有任务在跑（divide / extract / 形象图 / 角色视图 / 首帧提示词 / 首帧图 / 预演四宫格 / 视频）时每 3 秒刷新；发起任务后强制刷新 12 秒；编辑动作完成后由步骤组件调用 `refresh()`。
 
+打开作品时的默认步骤（`defaultStep`，URL 没有 hash 时生效）：没有镜头 → ①；视频全部完成 → ⑤；已开始生成视频 → ④；镜头里用到的角色还有没形象图的 → ②（形象图是关键帧的前置条件，哪怕已出过关键帧也先回到这里）；有关键帧 → ③；否则 ②。
+
 ## 各步骤与后端调用（`pages/creator/actions.ts`）
 
 | 步骤 | 用户操作 | 后端调用（均为 OpenAPI generated client） |
@@ -33,6 +35,7 @@ CreatorPage
 | ① 剧本 | 一句话起草剧本 | `POST script-processing/draft-script-async`（`project_id` / 可选 `chapter_id` / `idea` / `target_seconds`）→ 轮询 → 任务结果 `ScriptDraftResult{title, logline, outline, script_text, notes}` 填进剧本框（`draftScript`）；只写文本，不动已有镜头 |
 | ① 剧本 | 一键拆分镜 | `ensureChapter`（创建 / 更新章节 raw_text）→ `divide-async(write_to_db)` → 轮询 → `extract-async(script_division)` → 轮询 → `POST chapters/{id}/auto-confirm` |
 | ① 剧本 | 重新拆分镜 | 先逐个 `DELETE shots/{id}`，再执行上面的链 |
+| ② 角色场景 | 形象图作为关键帧的前置 | `entitiesAwaitingImage(board)`（`actions.ts`：本集镜头用到、没有形象图、也没有进行中任务的实体）非空时，页面与导演助手的主按钮都是「全部生成形象 · N 张图」，「跳过，去分镜板」降为次按钮并提示后果，页面上列出还缺哪些；为空时主按钮才是「下一步：分镜板」 |
 | ② 角色场景 | 生成形象 / 换一张 | 角色：`render-prompt` / `image-tasks` 允许 `image_id` 为空，按角色级任务（`relation_type=character`）执行，完成后由执行器创建首张正面 `CharacterImage`；场景 / 道具 / 服装：无槽位时先 `POST entities/{type}/{id}/images`，再 `render-prompt` → `image-tasks` |
 | ② 角色场景 | 查看 / 修改提示词再生成 | `render-prompt` 的结果显示在抽屉里，用户改过后以该文本调用 `image-tasks`（`generateEntityImage(entity, prompt)`） |
 | ② 角色场景 | 一次生成 1 / 2 / 4 张候选 | `generateEntityImages`：提示词只渲染一次，连发 N 个 `image-tasks`；每个任务落盘的 `GenerationTaskLink.file_id` 就是历史候选，聚合里按「当前 → 新 → 旧 → 上传」给出 `image_candidates`（≤8） |
@@ -41,6 +44,7 @@ CreatorPage
 | ② 角色场景 | 上传自己的图 | 浏览器先缩到 ≤2048px JPEG（`utils/imageResize.ts`，避开 Vercel 4.5 MB 请求体上限）→ `POST files/upload`（multipart，带 `usage_kind`）→ `POST creator/entities/{type}/{id}/image-from-file` |
 | ② 角色场景 | 改名称 / 设定、选出现镜头、删除 | `PATCH entities/{type}/{id}`；`PUT creator/chapters/{cid}/entities/{type}/{id}/shots`；`DELETE entities/{type}/{id}` |
 | ② 角色场景 | 新增角色 / 场景 / 道具 | `POST creator/chapters/{cid}/entities`（沿用作品题材 / 画面风格，可直接挂到若干镜头） |
+| ③ 分镜 | 生成全部关键帧 | 先按还没有关键帧的镜头算出缺形象的实体（`entitiesAwaitingImage(board, shotIds)`）：有则顶部警告条列出名字，按钮改为「先生成形象再出关键帧 · N 张图」；点击后先逐个发形象图任务，`waitForEntityImages` 每 4 s 重拉创作板直到这些实体出图或任务结束（上限 8 分钟），再按最新的板给每个镜头出关键帧（参考图才带得上）；警告条另有「回到角色场景」与「不等形象，直接出关键帧」 |
 | ③ 分镜 | 生成关键帧 | 画面描述为空时 `POST film/tasks/shot-frame-prompts(first)` → 轮询 → 读 `shot-details` 的 `first_frame_prompt`；再 `POST image-tasks/shot/{id}/frame-image-tasks`（参考图 = 镜头关联实体的形象图 `image_file_id`，比例 = 作品默认比例）。抽屉里的「保存并生成」先写回编辑内容再生成 |
 | ③ 分镜 | 上传关键帧 | 同上缩图 → `POST files/upload` → `POST creator/shots/{id}/keyframe-from-file`（覆盖 first 槽位） |
 | ③ 分镜 | 关键帧历史候选 | 每次首帧图任务的结果都留在任务关联里，聚合为 `keyframe_candidates`；候选条点一张 → `keyframe-from-file` 切回 |
