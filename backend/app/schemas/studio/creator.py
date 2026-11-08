@@ -76,6 +76,8 @@ class CreatorShotRead(_ReadModel):
     prop_ids: list[str] = Field(default_factory=list)
     keyframe_file_id: str | None = Field(None, description="首帧图片文件 ID")
     keyframe_url: str | None = Field(None, description="首帧图片地址")
+    last_frame_file_id: str | None = Field(None, description="已生成视频的尾帧文件 ID（承接下一镜的参考图）")
+    last_frame_url: str | None = Field(None, description="已生成视频的尾帧地址")
     keyframe_prompt_task: CreatorTaskRead | None = Field(None, description="最近一次首帧提示词任务")
     keyframe_image_task: CreatorTaskRead | None = Field(None, description="最近一次首帧图片任务")
     keyframe_candidates: list[CreatorImageCandidateRead] = Field(default_factory=list, description="关键帧候选 / 历史（当前在前，最多 8 张）")
@@ -110,6 +112,8 @@ class CreatorProjectRead(_ReadModel):
     name: str
     style: str
     visual_style: str
+    style_preset: str | None = Field(None, description="画面风格预设 key；老作品为空")
+    style_label: str = Field("", description="展示用风格名：预设名或旧题材值")
     default_video_ratio: str | None = None
 
 
@@ -250,6 +254,8 @@ class ProjectOverviewRead(_ReadModel):
     description: str = ""
     style: str
     visual_style: str
+    style_preset: str | None = Field(None, description="画面风格预设 key；老作品为空")
+    style_label: str = Field("", description="展示用风格名：预设名或旧题材值")
     default_video_ratio: str | None = None
     chapter_count: int = 0
     shot_count: int = 0

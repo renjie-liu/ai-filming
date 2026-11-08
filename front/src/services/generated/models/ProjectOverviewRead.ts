@@ -11,6 +11,14 @@ export type ProjectOverviewRead = {
     description: string;
     style: string;
     visual_style: string;
+    /**
+     * 画面风格预设 key；老作品为空
+     */
+    style_preset: (string | null);
+    /**
+     * 展示用风格名：预设名或旧题材值
+     */
+    style_label: string;
     default_video_ratio: (string | null);
     chapter_count: number;
     shot_count: number;

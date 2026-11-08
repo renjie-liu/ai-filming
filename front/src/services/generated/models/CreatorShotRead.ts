@@ -54,6 +54,14 @@ export type CreatorShotRead = {
      */
     keyframe_url: (string | null);
     /**
+     * 已生成视频的尾帧文件 ID（承接下一镜的参考图）
+     */
+    last_frame_file_id: (string | null);
+    /**
+     * 已生成视频的尾帧地址
+     */
+    last_frame_url: (string | null);
+    /**
      * 最近一次首帧提示词任务
      */
     keyframe_prompt_task: (CreatorTaskRead | null);

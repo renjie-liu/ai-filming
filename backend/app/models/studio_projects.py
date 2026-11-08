@@ -42,6 +42,18 @@ class Project(Base, TimestampMixin):
         default=None,
         comment="项目级默认视频比例（可为空；分镜未覆盖时使用）",
     )
+    style_preset: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        default=None,
+        comment="画面风格预设 key（见 services/studio/style_presets.py；为空时沿用 style / visual_style 粗分桶）",
+    )
+    style_prompt: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+        comment="用户自定义的风格补充描述，拼在预设风格提示词之后进入所有图片 / 视频提示词",
+    )
     stats: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, comment="聚合统计（JSON）")
 
     chapters: Mapped[list["Chapter"]] = relationship(

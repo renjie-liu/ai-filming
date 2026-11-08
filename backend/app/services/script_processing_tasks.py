@@ -20,6 +20,7 @@ from app.dependencies import get_llm
 from app.models.task import GenerationTask, GenerationTaskStatus
 from app.models.task_links import GenerationTaskLink
 from app.chains.agents import EntityMergerAgent, VariantAnalyzerAgent
+from app.services.studio.style_presets import resolve_style_text
 
 
 logger = logging.getLogger(__name__)
@@ -670,7 +671,7 @@ async def create_script_draft_task(
         relation_entity_id=relation_entity_id,
         run_args={
             "idea": idea.strip(),
-            "style": str(getattr(project.style, "value", project.style) or ""),
+            "style": resolve_style_text(project),
             "visual_style": str(getattr(project.visual_style, "value", project.visual_style) or ""),
             "target_seconds": int(target_seconds or 60),
             "episode_index": episode_index,

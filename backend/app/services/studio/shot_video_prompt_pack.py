@@ -29,6 +29,7 @@ from app.schemas.studio.shots import (
 from app.services.common import entity_not_found
 from app.services.studio.action_beats import infer_action_beat_sequence
 from app.services.studio.shot_assets_overview import get_shot_assets_overview
+from app.services.studio.style_presets import resolve_style_text
 
 DEFAULT_VIDEO_NEGATIVE_PROMPT = (
     "不要新增无关人物；不要改变角色身份、服装颜色和场景地点；"
@@ -553,7 +554,7 @@ async def build_shot_video_prompt_pack(
         ),
         atmosphere=str(getattr(detail, "atmosphere", "") or ""),
         visual_style=_enum_value(getattr(project, "visual_style", None)),
-        style=_enum_value(getattr(project, "style", None)),
+        style=resolve_style_text(project),
         negative_prompt=DEFAULT_VIDEO_NEGATIVE_PROMPT,
     )
 

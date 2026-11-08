@@ -211,8 +211,8 @@ const ScriptStep: React.FC<Props> = ({ projectId, project, chapters, chapter, bo
           <div className="flex flex-wrap gap-x-8 gap-y-3 items-center">
             <div className="flex items-center gap-2 text-sm">
               <span className="text-gray-500">风格</span>
+              <Tag>{project.style_label || project.style}</Tag>
               <Tag>{project.visual_style}</Tag>
-              <Tag>{project.style}</Tag>
             </div>
             <div className="flex items-center gap-2 text-sm">
               <span className="text-gray-500">比例</span>

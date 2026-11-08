@@ -96,6 +96,7 @@ from app.services.studio.shot_preparation_state import (
     link_existing_asset_for_preparation,
 )
 from app.services.studio.shot_status import recompute_shot_status
+from app.services.studio.style_presets import style_label
 from app.services.studio.shot_video_prompt_pack import (
     build_preview_grid_prompt,
     build_shot_video_prompt_pack,
@@ -434,13 +435,16 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
 
     # 首帧（关键帧）与 key 帧（预演四宫格）图片 / 任务 / 历史候选
     all_frames = (
-        (await db.execute(select(ShotFrameImage).where(ShotFrameImage.shot_detail_id.in_(shot_ids), ShotFrameImage.frame_type.in_([ShotFrameType.first, ShotFrameType.key])))).scalars().all()
+        (await db.execute(select(ShotFrameImage).where(ShotFrameImage.shot_detail_id.in_(shot_ids), ShotFrameImage.frame_type.in_([ShotFrameType.first, ShotFrameType.key, ShotFrameType.last])))).scalars().all()
         if shot_ids
         else []
     )
     frames = [f for f in all_frames if f.frame_type == ShotFrameType.first]
     frame_by_shot = {f.shot_detail_id: f for f in frames}
     grid_by_shot = {f.shot_detail_id: f for f in all_frames if f.frame_type == ShotFrameType.key}
+    # 尾帧：视频生成时由方舟 return_last_frame 回传并转存；下一镜「承接上一镜」用它做参考图
+    last_frame_by_shot = {f.shot_detail_id: f.file_id for f in all_frames if f.frame_type == ShotFrameType.last and f.file_id}
+    all_frames = [f for f in all_frames if f.frame_type != ShotFrameType.last]
     frame_image_tasks = await _latest_tasks(db, relation_type="shot_frame_image", entity_ids=[str(f.id) for f in all_frames])
     frame_history = await _task_files(db, relation_type="shot_frame_image", entity_ids=[str(f.id) for f in frames])
     keyframe_candidates = {f.shot_detail_id: _candidate_rows(f.file_id, frame_history.get(str(f.id), [])) for f in frames}
@@ -553,6 +557,7 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
                 )
             )
 
+    file_ids += list(last_frame_by_shot.values())
     urls = await _file_urls(db, file_ids)
     for ent in entities:
         if ent.type == "character":
@@ -615,6 +620,8 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
                 prop_ids=asset_ids_by_shot[shot.id]["prop"] if shot.id in asset_ids_by_shot else [],
                 keyframe_file_id=keyframe_file_id,
                 keyframe_url=urls.get(keyframe_file_id) if keyframe_file_id else None,
+                last_frame_file_id=last_frame_by_shot.get(shot.id),
+                last_frame_url=urls.get(last_frame_by_shot[shot.id]) if shot.id in last_frame_by_shot else None,
                 keyframe_prompt_task=prompt_tasks.get(shot.id),
                 keyframe_image_task=frame_image_tasks.get(str(frame.id)) if frame is not None else None,
                 keyframe_candidates=_candidate_reads(keyframe_candidates.get(shot.id, []), urls),
@@ -636,6 +643,8 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
             name=project.name,
             style=_enum_value(project.style),
             visual_style=_enum_value(project.visual_style),
+            style_preset=project.style_preset,
+            style_label=style_label(project),
             default_video_ratio=project.default_video_ratio,
         ),
         chapter=CreatorChapterRead(id=chapter.id, index=chapter.index, title=chapter.title, raw_text=chapter.raw_text or "", status=_enum_value(chapter.status)),
@@ -1122,6 +1131,8 @@ async def build_projects_overview(db: AsyncSession) -> list[ProjectOverviewRead]
                 description=p.description or "",
                 style=_enum_value(p.style),
                 visual_style=_enum_value(p.visual_style),
+                style_preset=p.style_preset,
+                style_label=style_label(p),
                 default_video_ratio=p.default_video_ratio,
                 chapter_count=len(p_chapters),
                 shot_count=len(p_shots),

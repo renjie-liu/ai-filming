@@ -276,6 +276,7 @@ export type { StudioScriptExtractionDraft } from './models/StudioScriptExtractio
 export type { StudioShotDraft } from './models/StudioShotDraft';
 export type { StudioShotDraftDialogueLine } from './models/StudioShotDraftDialogueLine';
 export type { StyleOption } from './models/StyleOption';
+export type { StylePresetRead } from './models/StylePresetRead';
 export type { TaskCancelRead } from './models/TaskCancelRead';
 export type { TaskCancelRequest } from './models/TaskCancelRequest';
 export type { TaskCreated } from './models/TaskCreated';

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.models.studio import ChapterStatus, ProjectStyle, ProjectVisualStyle
+from app.services.studio.style_presets import style_label
 
 
 PROJECT_STYLE_EXAMPLES = [x.value for x in ProjectStyle]
@@ -21,6 +22,11 @@ class ProjectBase(BaseModel):
     unify_style: bool = Field(True, description="是否统一风格")
     progress: int = Field(0, description="进度百分比（0-100）")
     default_video_ratio: str | None = Field(None, description="项目级默认视频比例；分镜未覆盖时生效")
+    style_preset: str | None = Field(
+        None,
+        description="画面风格预设 key（见 /projects/style-options 的 presets）；给出时 visual_style / style 以预设为准",
+    )
+    style_prompt: str | None = Field(None, description="自定义风格补充描述，拼在预设提示词之后进入所有提示词")
     stats: dict[str, Any] = Field(default_factory=dict, description="聚合统计（JSON）")
 
 
@@ -37,6 +43,8 @@ class ProjectUpdate(BaseModel):
     unify_style: bool | None = None
     progress: int | None = None
     default_video_ratio: str | None = None
+    style_preset: str | None = None
+    style_prompt: str | None = None
     stats: dict[str, Any] | None = None
 
 
@@ -44,6 +52,12 @@ class ProjectRead(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+
+    @computed_field(description="展示用风格名：预设名（如「电影胶片」）或旧题材值（如「真人都市」）")  # type: ignore[prop-decorator]
+    @property
+    def style_label(self) -> str:
+        """页面上只显示风格名，不显示预设 key；与创作板 / 作品列表的 `style_label` 口径一致。"""
+        return style_label(self)
 
 
 class ChapterBase(BaseModel):
@@ -86,9 +100,25 @@ class StyleOption(BaseModel):
     label: str = Field(..., description="选项展示文案")
 
 
+class StylePresetRead(BaseModel):
+    """一个可直接套用的画面风格预设（新建作品时的风格卡片）。"""
+
+    key: str = Field(..., description="预设 key，写入 Project.style_preset")
+    label: str = Field(..., description="卡片标题")
+    group: str = Field(..., description="分组：真人实拍 / 动画 / 艺术")
+    visual_style: str = Field(..., description="预设对应的画面表现形式（现实 / 动漫）")
+    style: str = Field(..., description="预设对应的题材粗分桶")
+    prompt: str = Field(..., description="进入提示词的风格描述")
+    blurb: str = Field("", description="一句话说明")
+    tags: list[str] = Field(default_factory=list, description="卡片小标签")
+
+
 class ProjectStyleOptionsRead(BaseModel):
     """项目风格候选项。"""
 
+    preset_groups: list[str] = Field(default_factory=list, description="预设分组顺序")
+    presets: list[StylePresetRead] = Field(default_factory=list, description="画面风格预设目录")
+    default_preset: str | None = Field(None, description="新建作品默认选中的预设 key")
     visual_styles: list[StyleOption] = Field(default_factory=list, description="视觉风格可选项")
     styles_by_visual_style: dict[str, list[StyleOption]] = Field(
         default_factory=dict,

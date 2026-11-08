@@ -38,9 +38,21 @@ export type ProjectRead = {
      */
     default_video_ratio?: (string | null);
     /**
+     * 画面风格预设 key（见 /projects/style-options 的 presets）；给出时 visual_style / style 以预设为准
+     */
+    style_preset?: (string | null);
+    /**
+     * 自定义风格补充描述，拼在预设提示词之后进入所有提示词
+     */
+    style_prompt?: (string | null);
+    /**
      * 聚合统计（JSON）
      */
     stats?: Record<string, any>;
     id: string;
+    /**
+     * 展示用风格名：预设名（如「电影胶片」）或旧题材值（如「真人都市」）
+     */
+    readonly style_label: string;
 };
 

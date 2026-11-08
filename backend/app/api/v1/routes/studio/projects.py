@@ -29,6 +29,13 @@ from app.schemas.studio.projects import (
     ProjectStyleOptionsRead,
     ProjectUpdate,
     StyleOption,
+    StylePresetRead,
+)
+from app.services.studio.style_presets import (
+    STYLE_GROUPS,
+    default_style_preset_key,
+    get_style_preset,
+    list_style_presets,
 )
 
 router = APIRouter()
@@ -37,12 +44,13 @@ PROJECT_ORDER_FIELDS = {"name", "created_at", "updated_at", "progress"}
 
 
 def _build_project_style_options() -> tuple[dict[ProjectVisualStyle, list[ProjectStyle]], dict[ProjectVisualStyle, ProjectStyle]]:
+    """按画面表现形式（现实 / 动漫）归类题材粗分桶：`real_people_*` 归现实，其余（动漫、国漫、水墨、艺术化）归动漫。"""
     mapping: dict[ProjectVisualStyle, list[ProjectStyle]] = {key: [] for key in ProjectVisualStyle}
     for item in ProjectStyle:
         if item.name.startswith("real_people_"):
             mapping[ProjectVisualStyle.live_action].append(item)
             continue
-        if item.name.startswith("anime_") or item.name in {"guoman", "ink_wash"}:
+        if item.name.startswith("anime_") or item.name in {"guoman", "ink_wash", "art_stylized"}:
             mapping[ProjectVisualStyle.anime].append(item)
             continue
     defaults: dict[ProjectVisualStyle, ProjectStyle] = {
@@ -51,6 +59,24 @@ def _build_project_style_options() -> tuple[dict[ProjectVisualStyle, list[Projec
         if styles
     }
     return mapping, defaults
+
+
+def _apply_style_preset(update_data: dict) -> None:
+    """请求里带 `style_preset` 时校验 key 并用预设的粗分桶覆盖 `visual_style` / `style`，保证三者一致。
+
+    未知 key 抛 ValueError（由路由转成 400）；`style_preset=None` 表示清除预设，不改动其它字段。
+    """
+    if "style_preset" not in update_data:
+        return
+    key = update_data.get("style_preset")
+    if key is None:
+        return
+    preset = get_style_preset(key)
+    if preset is None:
+        raise ValueError(f"unknown style_preset: {key}")
+    update_data["style_preset"] = preset.key
+    update_data["visual_style"] = preset.visual_style
+    update_data["style"] = preset.style
 
 
 def _validate_project_style_combo(*, visual_style: ProjectVisualStyle, style: ProjectStyle) -> None:
@@ -81,6 +107,21 @@ async def get_project_style_options(
 ) -> ApiResponse[ProjectStyleOptionsRead]:
     mapping, defaults = _build_project_style_options()
     data = ProjectStyleOptionsRead(
+        preset_groups=list(STYLE_GROUPS),
+        presets=[
+            StylePresetRead(
+                key=item.key,
+                label=item.label,
+                group=item.group,
+                visual_style=item.visual_style.value,
+                style=item.style.value,
+                prompt=item.prompt,
+                blurb=item.blurb,
+                tags=list(item.tags),
+            )
+            for item in list_style_presets()
+        ],
+        default_preset=default_style_preset_key(),
         visual_styles=[StyleOption(value=x.value, label=x.value) for x in ProjectVisualStyle],
         styles_by_visual_style={
             visual.value: [StyleOption(value=style.value, label=style.value) for style in styles]
@@ -127,11 +168,13 @@ async def create_project(
         body.id,
         detail=entity_already_exists("Project"),
     )
+    data = body.model_dump()
     try:
-        _validate_project_style_combo(visual_style=body.visual_style, style=body.style)
+        _apply_style_preset(data)
+        _validate_project_style_combo(visual_style=data["visual_style"], style=data["style"])
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    obj = await create_and_refresh(db, Project(**body.model_dump()))
+    obj = await create_and_refresh(db, Project(**data))
     return created_response(ProjectRead.model_validate(obj))
 
 
@@ -160,6 +203,10 @@ async def update_project(
 ) -> ApiResponse[ProjectRead]:
     obj = await get_or_404(db, Project, project_id, detail=entity_not_found("Project"))
     update_data = body.model_dump(exclude_unset=True)
+    try:
+        _apply_style_preset(update_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     visual_style = update_data.get("visual_style", obj.visual_style)
     style = update_data.get("style", obj.style)
     if visual_style is not None and style is not None:

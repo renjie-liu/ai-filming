@@ -14,6 +14,10 @@ class ProjectStyle(str, Enum):
     anime_3d = "动漫3D"
     guoman = "国漫"
     ink_wash = "水墨画"
+    # 风格预设目录（style_presets.py）新增的粗粒度分桶：动画日常 / 动画古风 / 艺术化（黏土、像素、剪纸等）
+    anime_daily = "动漫日常"
+    anime_ancient = "动漫古风"
+    art_stylized = "艺术风格"
 
 
 class ProjectVisualStyle(str, Enum):

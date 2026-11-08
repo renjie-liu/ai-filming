@@ -72,8 +72,42 @@ async def _write_meta(conn: AsyncConnection, key: str, value: str) -> None:
     await conn.execute(bootstrap_meta_table.insert().values(key=key, value=value))
 
 
+def add_missing_columns(sync_conn) -> list[str]:
+    """给已存在的表补上模型里新增的可空列（`ALTER TABLE … ADD COLUMN`），返回 `table.column` 列表。
+
+    为什么存在：`create_all` 只建缺失的表，不会改已有表；项目没有 Alembic，新增列（如 `projects.style_preset`）
+    在老库上会导致查询直接报错。只处理可空列或带服务端默认值的列，其它情况记日志跳过，由人工迁移。
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    from app.core.db import Base
+
+    inspector = sa_inspect(sync_conn)
+    existing_tables = set(inspector.get_table_names())
+    ddl = sync_conn.dialect.ddl_compiler(sync_conn.dialect, None)
+    preparer = sync_conn.dialect.identifier_preparer
+    added: list[str] = []
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue
+        existing_columns = {col["name"] for col in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in existing_columns:
+                continue
+            if not column.nullable and column.server_default is None:
+                # 只有 Python 侧默认值的非空列无法在有数据的表上安全 ADD COLUMN，留给人工迁移
+                logger.warning("deploy bootstrap: skip non-nullable new column %s.%s (needs manual migration)", table.name, column.name)
+                continue
+            spec = ddl.get_column_specification(column)
+            sync_conn.execute(text(f"ALTER TABLE {preparer.format_table(table)} ADD COLUMN {spec}"))
+            added.append(f"{table.name}.{column.name}")
+    if added:
+        logger.info("deploy bootstrap: added columns %s", ", ".join(added))
+    return added
+
+
 async def ensure_schema() -> bool:
-    """幂等建表；返回本次是否执行了 create_all。"""
+    """幂等建表并补齐新增列；返回本次是否执行了 create_all。"""
     from app.core.db import Base, engine
 
     _import_all_models()
@@ -88,6 +122,7 @@ async def ensure_schema() -> bool:
         if await _read_meta(conn, "schema_fingerprint") == fingerprint:
             return False
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(add_missing_columns)
         await _write_meta(conn, "schema_fingerprint", fingerprint)
         logger.info("deploy bootstrap: schema created/updated (fingerprint=%s)", fingerprint)
         return True

@@ -32,6 +32,7 @@ from app.services.llm.runtime import build_default_text_llm_sync
 from app.services.common import entity_not_found, invalid_choice
 from app.services.studio.action_beats import infer_action_beat_sequence, pick_action_beat_for_frame
 from app.services.studio.shot_status import recompute_shot_status
+from app.services.studio.style_presets import resolve_style_text
 from app.services.worker.async_task_support import cancel_if_requested_async
 from app.services.worker.task_logging import log_task_event, log_task_failure
 
@@ -655,7 +656,8 @@ async def build_run_args(
     dialog_summary = "\n".join(line.text for line in (detail.dialog_lines or []) if line.text)
     project = getattr(getattr(shot, "chapter", None), "project", None)
     visual_style = _enum_value(getattr(project, "visual_style", None))
-    style = _enum_value(getattr(project, "style", None))
+    # 画面风格：有预设时是整段风格提示词（介质 / 镜头 / 光线 / 色彩），否则是旧的题材枚举值
+    style = resolve_style_text(project)
     unify_style = bool(getattr(project, "unify_style", True)) if project is not None else True
 
     characters = [

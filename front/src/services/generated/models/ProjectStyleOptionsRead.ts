@@ -3,10 +3,23 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { StyleOption } from './StyleOption';
+import type { StylePresetRead } from './StylePresetRead';
 /**
  * 项目风格候选项。
  */
 export type ProjectStyleOptionsRead = {
+    /**
+     * 预设分组顺序
+     */
+    preset_groups?: Array<string>;
+    /**
+     * 画面风格预设目录
+     */
+    presets?: Array<StylePresetRead>;
+    /**
+     * 新建作品默认选中的预设 key
+     */
+    default_preset?: (string | null);
     /**
      * 视觉风格可选项
      */

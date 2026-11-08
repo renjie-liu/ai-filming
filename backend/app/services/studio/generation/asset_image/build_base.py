@@ -4,6 +4,8 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+from sqlalchemy import select
+
 from app.models.studio import (
     AssetQualityLevel,
     Actor,
@@ -12,6 +14,10 @@ from app.models.studio import (
     Character,
     Costume,
     CostumeImage,
+    Project,
+    ProjectCostumeLink,
+    ProjectPropLink,
+    ProjectSceneLink,
     PromptCategory,
     Prop,
     PropImage,
@@ -35,6 +41,7 @@ from app.services.studio.image_tasks import (
     is_front_view,
     map_view_angle_for_prompt,
 )
+from app.services.studio.style_presets import resolve_style_text
 
 
 class AssetImageBaseDraft(GenerationBaseDraft):
@@ -55,6 +62,37 @@ def _enum_value(value: Any) -> str:
     return str(raw or "")
 
 
+_ASSET_LINK_MODELS: dict[str, tuple[Any, str]] = {
+    "scene": (ProjectSceneLink, "scene_id"),
+    "prop": (ProjectPropLink, "prop_id"),
+    "costume": (ProjectCostumeLink, "costume_id"),
+}
+
+
+async def _project_style_text(db, *, project_id: str | None) -> str | None:
+    """按项目 ID 取作品的画面风格文字（预设提示词 + 自定义补充）；无项目或项目无预设时返回 None，让调用方回退实体自身的 style。"""
+    if not project_id:
+        return None
+    project = await db.get(Project, project_id)
+    if project is None or (not project.style_preset and not (project.style_prompt or "").strip()):
+        return None
+    return resolve_style_text(project)
+
+
+async def _asset_project_style_text(db, *, asset_type: str, asset_id: str) -> str | None:
+    """场景 / 道具 / 服装没有 project_id 列，经项目关联表找到首个所属作品后取其风格文字。"""
+    spec = _ASSET_LINK_MODELS.get(asset_type)
+    if spec is None:
+        return None
+    link_model, id_field = spec
+    project_id = (
+        await db.execute(
+            select(link_model.project_id).where(getattr(link_model, id_field) == asset_id).order_by(link_model.id.asc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    return await _project_style_text(db, project_id=project_id)
+
+
 async def _build_asset_prompt(
     db,
     *,
@@ -65,7 +103,9 @@ async def _build_asset_prompt(
     visual_style: Any,
     style: Any,
     image_row: Any,
+    style_text: str | None = None,
 ) -> str:
+    """资产图片提示词：`style_text`（作品预设风格）优先于实体自身的粗分桶 `style`。"""
     category = asset_prompt_category(
         relation_type=relation_type,
         is_front_view=is_front_view(image_row.view_angle),
@@ -78,7 +118,7 @@ async def _build_asset_prompt(
             "description": description,
             "tags": ", ".join(tags or []),
             "visual_style": _enum_value(visual_style),
-            "style": _enum_value(style),
+            "style": style_text or _enum_value(style),
             "view_angle": map_view_angle_for_prompt(image_row.view_angle),
             "quality_level": image_row.quality_level,
             "format": image_row.format,
@@ -187,6 +227,7 @@ async def build_asset_image_base_draft(
         visual_style=asset.visual_style,
         style=asset.style,
         image_row=image_row,
+        style_text=await _asset_project_style_text(db, asset_type=asset_type_norm, asset_id=asset_id),
     )
     if not is_front_view(image_row.view_angle):
         refs = await _resolve_front_ref(
@@ -222,6 +263,7 @@ async def build_character_image_base_draft(
     view_angle = image_row.view_angle if image_row is not None else AssetViewAngle.front
     quality_level = image_row.quality_level if image_row is not None else AssetQualityLevel.low
     image_format = (image_row.format if image_row is not None else None) or "png"
+    project_style_text = await _project_style_text(db, project_id=getattr(character, "project_id", None))
     prompt = await build_prompt_with_template(
         db,
         category=PromptCategory.combined,
@@ -229,7 +271,7 @@ async def build_character_image_base_draft(
             "name": character.name,
             "description": character.description,
             "visual_style": _enum_value(character.visual_style),
-            "style": _enum_value(character.style),
+            "style": project_style_text or _enum_value(character.style),
             "view_angle": map_view_angle_for_prompt(view_angle),
             "quality_level": quality_level,
             "format": image_format,
