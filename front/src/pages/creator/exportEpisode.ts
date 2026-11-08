@@ -117,6 +117,19 @@ export function buildSrt(clips: ExportClip[]): string {
   return blocks.join('\n')
 }
 
+/**
+ * 同一份对白时间轴的 WebVTT 版本：给合成预览播放器的 <track> 用（浏览器只认 VTT，不认 SRT）。
+ */
+export function buildVtt(clips: ExportClip[]): string {
+  const srt = buildSrt(clips)
+  if (!srt.trim()) return ''
+  const body = srt
+    .split('\n')
+    .map((line) => (/^\d{2}:\d{2}:\d{2},\d{3} --> /.test(line) ? line.replace(/,(\d{3})/g, '.$1') : line))
+    .join('\n')
+  return `WEBVTT\n\n${body}`
+}
+
 /** 触发浏览器下载。 */
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
