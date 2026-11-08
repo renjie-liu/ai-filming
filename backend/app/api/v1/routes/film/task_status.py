@@ -13,6 +13,7 @@ from app.dependencies import get_db
 from app.models.task_links import GenerationTaskLink
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, paginated_response, success_response
 from app.services.common import entity_not_found
+from app.services.worker.async_task_support import fail_stale_inline_tasks
 from app.tasks.execute_task import revoke_task_execution
 
 from .common import (
@@ -85,6 +86,8 @@ async def list_tasks(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
 ) -> ApiResponse[PaginatedData[TaskListItemRead]]:
+    # 函数被回收后停在 running 的 inline 任务先标记失败，任务中心才不会永远显示「生成中」
+    await fail_stale_inline_tasks(db)
     store = SqlAlchemyTaskStore(db)
     items, total = await store.list_task_views(
         statuses=statuses,

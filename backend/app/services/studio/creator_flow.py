@@ -67,6 +67,7 @@ from app.schemas.studio.shots import ShotLinkedAssetItem
 from app.services.common import entity_not_found
 from app.services.studio.entity_crud import create_entity
 from app.services.studio.entity_thumbnails import download_url
+from app.services.worker.async_task_support import fail_stale_inline_tasks
 from app.services.studio.file_usages import sync_usage_from_shot_context
 from app.services.studio.generation.asset_image import (
     build_asset_image_context,
@@ -441,6 +442,7 @@ async def build_creator_board(db: AsyncSession, *, chapter_id: str) -> CreatorBo
     frame_history = await _task_files(db, relation_type="shot_frame_image", entity_ids=[str(f.id) for f in frames])
     keyframe_candidates = {f.shot_detail_id: _candidate_rows(f.file_id, frame_history.get(str(f.id), [])) for f in frames}
     prompt_tasks = await _latest_tasks(db, relation_type="shot_first_frame_prompt", entity_ids=shot_ids)
+    await fail_stale_inline_tasks(db)  # 先修正函数被回收后遗留的 running 任务，再读各资源的最近任务
     video_tasks = await _latest_tasks(db, relation_type="video", entity_ids=shot_ids)
 
     # 配音 / 配乐参考：按镜头取最近一条 reference_audio 用途记录

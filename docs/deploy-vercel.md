@@ -178,8 +178,11 @@ run it and written its result to the database.
   the balance goes negative, Ark answers every model with `AccountOverdueError`.
 
 - Generation jobs run inside the API function after the response is sent and are
-  bounded by the function max duration (300 s on Hobby). If a job outlives that limit,
-  it stays in `running` state.
+  bounded by the function max duration (300 s on Hobby). If a job outlives that limit
+  the function is reclaimed and nobody updates the task row; the task list and the
+  creator board mark such tasks (running for more than 10 minutes) as failed with a
+  retry hint. Starting many videos at once makes this more likely, so generate in
+  batches.
 - Task cancellation works through the database `cancel_requested` flag. Celery
   `revoke` broadcasts are not supported on Vercel Queues.
 - Blob URLs are public but unguessable (generated files use UUID keys). Set
