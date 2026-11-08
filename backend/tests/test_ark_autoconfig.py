@@ -159,3 +159,11 @@ def test_classify_probe_response_overdue_and_eu_region() -> None:
     assert ark_autoconfig.region_from_base_url("https://ark.eu-west.bytepluses.com/api/v3") == "byteplus-eu"
     assert ark_autoconfig.region_from_base_url("https://ark.ap-southeast.bytepluses.com/api/v3") == "byteplus"
     assert set(ark_autoconfig.ARK_MODEL_CANDIDATES["byteplus-eu"]) == {"text", "image", "video"}
+
+
+async def test_discover_prefers_seedream_5_for_images(mock_httpx) -> None:
+    # 图片候选以 Seedream 5.0 优先：其含人脸产物被 Seedance 2.x「信任」，4.x 产物会被输入审核拦下。
+    mock_httpx["transport"] = _fake_ark({"seed-2-0-lite-260428", "seedream-4-0-250828", "seedream-5-0-260128", "dreamina-seedance-2-5-260628"})
+    plan = await ark_autoconfig.discover_ark_config("ark-test-key")
+    assert plan["image"] == "seedream-5-0-260128"
+    assert ark_autoconfig.ARK_MODEL_CANDIDATES["byteplus"]["image"][0] == "seedream-5-0-260128"

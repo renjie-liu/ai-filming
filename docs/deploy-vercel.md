@@ -34,6 +34,13 @@ Nothing else is needed. On the first start (and whenever the key changes) the ap
 2. picks a text, image and video model **enabled on your account**. For video it
    chooses the **newest Seedance** in your account's catalogue (currently Seedance 2.5,
    `dreamina-seedance-2-5-260628`): newest version first, flagship before fast/mini.
+   For images it prefers **Seedream 5.0** (`seedream-5-0-260128`), then 4.5, then 4.0:
+   Seedance 2.x rejects any reference image with a human face
+   (`InputImageSensitiveContentDetected.PrivacyInformation`), including AI-generated
+   realistic portraits, but ModelArk trusts face images produced by Seedream 5.0
+   text-to-image under the same account within the last 30 days, so portraits and
+   keyframes made with 5.0 can be used as video references (see
+   [Create portrait videos with Dreamina Seedance models](https://docs.byteplus.com/en/docs/ModelArk/2608626)).
    Each candidate gets a deliberately incomplete request (no messages / no prompt / no
    content), which is rejected before anything is generated, so nothing is billed;
 3. creates the provider and models and sets them as defaults, then caches the result

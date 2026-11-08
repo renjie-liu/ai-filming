@@ -42,8 +42,10 @@ ARK_REGION_LABELS: dict[str, str] = {
     "volcengine": "火山方舟",
 }
 
-# 候选模型按优先级排列：优先选择与 Jellyfish 现有请求格式（Seedream 4.x 尺寸档位、Seedance 1.x content 结构）
-# 兼容且性价比高的模型；探测时取第一个已开通的。
+# 候选模型按优先级排列，探测时取第一个已开通的。
+# 图片优先 Seedream 5.0：Seedance 2.x 的输入审核会拦下任何含真人人脸的参考图（含 AI 写实人像），
+# 但方舟「信任模型产物」规则对同账号近 30 天内由 Seedream 5.0 文生图得到的含人脸原图放行，
+# 4.x 产物不在受信名单；因此形象图 / 关键帧用 5.0 生成才能作为视频参考图使用。
 ARK_MODEL_CANDIDATES: dict[str, dict[str, list[str]]] = {
     "byteplus": {
         "text": [
@@ -55,9 +57,9 @@ ARK_MODEL_CANDIDATES: dict[str, dict[str, list[str]]] = {
             "seed-1-6-flash-250715",
         ],
         "image": [
-            "seedream-4-0-250828",
-            "seedream-4-5-251128",
             "seedream-5-0-260128",
+            "seedream-4-5-251128",
+            "seedream-4-0-250828",
         ],
         # 视频：默认选用账号已开通的「最新版」Seedance；实际顺序以 /models 目录动态排序为准（见 rank_seedance_models）。
         "video": [
@@ -100,7 +102,7 @@ _PROBE_REQUESTS: dict[str, tuple[str, Any]] = {
 _CATEGORIES = ("text", "image", "video")
 _CACHE_PREFIX = "ark_autoconfig:"
 # 选型策略版本：策略变化（如改为「最新 Seedance」）时递增，使已缓存的探测结果失效并重新探测。
-_AUTOCONFIG_STRATEGY_VERSION = "2"
+_AUTOCONFIG_STRATEGY_VERSION = "3"
 
 _SEEDANCE_ID_RE = re.compile(r"seedance-(\d+)-(\d+)(?:-([a-z0-9-]+?))?-(\d{6,8})$")
 
