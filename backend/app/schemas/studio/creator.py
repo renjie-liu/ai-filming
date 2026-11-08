@@ -24,6 +24,7 @@ class CreatorTaskRead(_ReadModel):
     status: str = Field(..., description="pending / running / streaming / succeeded / failed / cancelled")
     progress: int = Field(0, description="进度 0-100")
     error: str | None = Field(None, description="失败原因（原文，前端负责中文映射）")
+    note: str | None = Field(None, description="成功但有折中时的中文说明，如参考图被平台拒绝后已自动去掉")
 
 
 class CreatorDialogueLineRead(_ReadModel):

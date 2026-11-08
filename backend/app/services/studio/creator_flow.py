@@ -278,8 +278,25 @@ async def _latest_tasks(db: AsyncSession, *, relation_type: str, entity_ids: lis
             status=_enum_value(task.status),
             progress=int(task.progress or 0),
             error=(task.error or None),
+            note=_task_note(task.result),
         )
     return out
+
+
+def _task_note(result: object) -> str | None:
+    """从任务结果里提炼给用户看的折中说明；目前只有「视频参考图被方舟人脸审核拒绝、已自动去掉」一种。"""
+    if not isinstance(result, dict):
+        return None
+    dropped = result.get("dropped_references")
+    if not isinstance(dropped, list) or not dropped:
+        return None
+    labels = [str(item.get("label") or "").split("：", 1)[0].strip() for item in dropped if isinstance(item, dict)]
+    labels = [label for label in labels if label]
+    kinds = {str(item.get("kind") or "") for item in dropped if isinstance(item, dict)}
+    if not labels and kinds & {"first_frame", "last_frame", "key_frame"}:
+        labels = ["首帧图"]
+    what = "、".join(labels[:3]) if labels else "部分参考图"
+    return f"视频平台拒绝了含真人形象的参考图（{what}），已自动去掉后生成"
 
 
 async def _task_files(db: AsyncSession, *, relation_type: str, entity_ids: list[str]) -> dict[str, list[tuple[str, str, str | None]]]:

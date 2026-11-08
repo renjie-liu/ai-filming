@@ -22,5 +22,9 @@ export type CreatorTaskRead = {
      * 失败原因（原文，前端负责中文映射）
      */
     error: (string | null);
+    /**
+     * 成功但有折中时的中文说明，如参考图被平台拒绝后已自动去掉
+     */
+    note: (string | null);
 };
 

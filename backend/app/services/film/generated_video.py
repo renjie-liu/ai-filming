@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import mimetypes
+import re
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -293,6 +294,137 @@ async def persist_generated_video_to_shot(
     return file_obj
 
 
+# 方舟输入审核拒绝某张图时的错误：`InputImageSensitiveContentDetected.PrivacyInformation: ... 'content[k]' may contain real person`
+_REJECTED_INPUT_IMAGE_RE = re.compile(r"InputImageSensitiveContentDetected\.\w+.*?'content\[(\d+)\]'", re.S)
+_IMAGE_TAG_RE = re.compile(r"\[Image (\d+)\]")
+_FRAME_FIELDS = ("first_frame_base64", "last_frame_base64", "key_frame_base64")
+# 最多自动去掉几张被拒的图再重试（每次被拒都在生成前发生，不计费）
+MAX_REJECTED_IMAGE_RETRIES = 4
+
+
+def content_layout(input_dict: dict) -> list[str]:
+    """按方舟请求 content 数组的真实顺序列出每一项的含义，用来把错误里的 `content[k]` 对回我们的输入。
+
+    顺序与 `volcengine.video_payload.build_content` 一致：text → first_frame → last_frame → key_frame →
+    reference_images（按序）→ audio；缺省项不占位。
+    """
+    layout: list[str] = []
+    if (input_dict.get("prompt") or "").strip():
+        layout.append("text")
+    for field, kind in (("first_frame_base64", "first_frame"), ("last_frame_base64", "last_frame"), ("key_frame_base64", "key_frame")):
+        if (input_dict.get(field) or "").strip():
+            layout.append(kind)
+    for index, value in enumerate(input_dict.get("reference_images") or []):
+        if str(value or "").strip():
+            layout.append(f"reference:{index}")
+    if (input_dict.get("reference_audio") or "").strip():
+        layout.append("audio")
+    return layout
+
+
+def renumber_image_references(prompt: str, *, dropped: int) -> tuple[str, str]:
+    """去掉提示词里第 `dropped` 张图（1 起）的 `[Image n]` 说明行，并把后面的编号前移一位。
+
+    返回 (新提示词, 被去掉那行的说明文字)。参考块之外的 `[Image n]` 引用同样重编号；对被去掉那张图的
+    其它引用直接删掉标签，避免模型去找一张不存在的图。
+    """
+    label = ""
+    kept: list[str] = []
+    for line in (prompt or "").splitlines():
+        match = _IMAGE_TAG_RE.match(line.strip())
+        if match and int(match.group(1)) == dropped:
+            label = line.strip()[match.end():].strip()
+            continue
+        kept.append(line)
+
+    def _shift(match: re.Match[str]) -> str:
+        n = int(match.group(1))
+        if n == dropped:
+            return ""
+        return f"[Image {n - 1}]" if n > dropped else match.group(0)
+
+    text = "\n".join(kept)
+    text = _IMAGE_TAG_RE.sub(_shift, text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return text.strip(), label
+
+
+def drop_rejected_input_image(input_dict: dict, error: str) -> tuple[dict, dict] | None:
+    """若 `error` 是方舟「输入图含真人」拒绝，返回去掉那张图后的新输入与记录；否则返回 None。
+
+    为什么存在：Seedance 2.x 只信任同账号 Seedream 5.0 文生图的人脸原图，关键帧（图生图）、用户上传的照片等
+    一旦含有清晰人脸就会整条请求被拒。拒绝发生在生成之前、不计费，所以最划算的做法是把被点名的那张图
+    去掉后立刻重试，保留其余（受信的）形象图，而不是直接失败让用户手动改成纯文字。
+    - 被拒的是全能参考里的某张图：删掉它并重编号提示词里的 [Image n]；
+    - 被拒的是首帧 / 尾帧 / 关键帧：去掉所有帧图，退回「纯文字 + 剩余参考图」；
+    - 去掉后既没有提示词也没有任何参考时返回 None（无法再重试）。
+    """
+    match = _REJECTED_INPUT_IMAGE_RE.search(error or "")
+    if not match:
+        return None
+    index = int(match.group(1))
+    layout = content_layout(input_dict)
+    if index < 0 or index >= len(layout):
+        return None
+    kind = layout[index]
+    new_input = dict(input_dict)
+    new_input["reference_images"] = list(input_dict.get("reference_images") or [])
+    record: dict = {"content_index": index, "kind": kind, "error": (error or "")[:300]}
+    if kind.startswith("reference:"):
+        ref_index = int(kind.split(":", 1)[1])
+        record["image"] = str(new_input["reference_images"][ref_index])[:300]
+        del new_input["reference_images"][ref_index]
+        new_input["prompt"], record["label"] = renumber_image_references(new_input.get("prompt") or "", dropped=ref_index + 1)
+    elif kind in ("first_frame", "last_frame", "key_frame"):
+        for field in _FRAME_FIELDS:
+            new_input[field] = None
+    else:
+        return None
+    has_prompt = bool((new_input.get("prompt") or "").strip())
+    has_reference = bool(new_input["reference_images"]) or any((new_input.get(f) or "").strip() for f in _FRAME_FIELDS) or bool(
+        (new_input.get("reference_audio") or "").strip()
+    )
+    if not has_prompt and not has_reference:
+        return None
+    return new_input, record
+
+
+async def _run_provider_with_rejection_retries(
+    *,
+    task_id: str,
+    provider: str,
+    api_key: str,
+    base_url: str | None,
+    input_dict: dict,
+) -> tuple[VideoGenerationResult, list[dict]]:
+    """调用供应商生成视频；输入图被方舟人脸审核拒绝时自动去掉那张图重试，返回 (结果, 被去掉的图记录)。"""
+    dropped: list[dict] = []
+    current = dict(input_dict)
+    for attempt in range(MAX_REJECTED_IMAGE_RETRIES + 1):
+        task = VideoGenerationTask(
+            provider_config=ProviderConfig(
+                provider=provider,  # type: ignore[arg-type]
+                api_key=api_key,
+                base_url=base_url,
+            ),
+            input_=VideoGenerationInput.model_validate(current),
+        )
+        await task.run()
+        result = await task.get_result()
+        if result is not None:
+            return result, dropped
+        status_dict = await task.status()
+        detailed_error = str(status_dict.get("error") or "") if isinstance(status_dict, dict) else ""
+        msg = detailed_error or "Video generation task returned no result"
+        adjusted = drop_rejected_input_image(current, msg) if attempt < MAX_REJECTED_IMAGE_RETRIES else None
+        if adjusted is None:
+            raise RuntimeError(msg)
+        current, record = adjusted
+        dropped.append(record)
+        log_task_event("video_generation", task_id, "retry_without_rejected_image", kind=record["kind"], content_index=record["content_index"])
+    raise RuntimeError("Video generation exhausted rejected-image retries")
+
+
 async def run_video_generation_task(
     task_id: str,
     run_args: dict,
@@ -313,23 +445,13 @@ async def run_video_generation_task(
             base_url = run_args.get("base_url")
             input_dict = dict(run_args.get("input") or {})
 
-            task = VideoGenerationTask(
-                provider_config=ProviderConfig(
-                    provider=provider,  # type: ignore[arg-type]
-                    api_key=api_key,
-                    base_url=base_url,
-                ),
-                input_=VideoGenerationInput.model_validate(input_dict),
+            result, dropped_references = await _run_provider_with_rejection_retries(
+                task_id=task_id,
+                provider=provider,
+                api_key=api_key,
+                base_url=base_url,
+                input_dict=input_dict,
             )
-            await task.run()
-            result = await task.get_result()
-            if result is None:
-                status_dict = await task.status()
-                detailed_error = ""
-                if isinstance(status_dict, dict):
-                    detailed_error = str(status_dict.get("error") or "")
-                msg = detailed_error or "Video generation task returned no result"
-                raise RuntimeError(msg)
             if await cancel_if_requested_async(store=store, task_id=task_id, session=session):
                 log_task_event("video_generation", task_id, "cancelled", stage="after_execute")
                 return
@@ -349,6 +471,9 @@ async def run_video_generation_task(
 
             result_payload = result.model_dump()
             result_payload["file_id"] = file_obj.id
+            if dropped_references:
+                # 记录被方舟人脸审核拒绝、已自动去掉的参考图，供界面提示「这一镜没有用到关键帧」
+                result_payload["dropped_references"] = dropped_references
             await store.set_result(task_id, result_payload)
             if await cancel_if_requested_async(store=store, task_id=task_id, session=session):
                 log_task_event("video_generation", task_id, "cancelled", stage="after_persist")

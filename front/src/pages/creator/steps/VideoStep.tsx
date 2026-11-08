@@ -385,6 +385,7 @@ const VideoStep: React.FC<Props> = ({ board, onBack, onFinal, onTaskStarted, onC
                     <span className="ml-auto">{s.video_file_id ? <Tag color="success">已完成</Tag> : <TaskTag task={s.video_task} />}</span>
                   </div>
                   {error ? <div className="text-red-600 text-xs mt-1">{error}</div> : <div className="text-gray-500 text-xs mt-1 line-clamp-2 min-h-[32px]">{s.description || s.script_excerpt}</div>}
+                  {!error && s.video_file_id && s.video_task?.note ? <div className="text-amber-600 text-xs mt-1">{s.video_task.note}</div> : null}
                   <div className="flex gap-2 mt-2 flex-wrap">
                     {!active && (
                       <Button size="small" type={error ? 'primary' : 'default'} loading={retrying[s.id]} onClick={() => void retry(s)}>
