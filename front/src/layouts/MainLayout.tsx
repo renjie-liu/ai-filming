@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
+import { useAuth } from '../auth/AuthContext'
 import { LANGUAGE_STORAGE_KEY } from '../i18n'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useTranslation } from 'react-i18next'
@@ -27,7 +28,7 @@ const MainLayout: React.FC = () => {
 
   const collapsed = useAppStore((state) => state.siderCollapsed)
   const toggleCollapsed = useAppStore((state) => state.toggleSider)
-  const user = useAppStore((state) => state.user)
+  const { user, logout } = useAuth()
   const language = useAppStore((state) => state.language)
   const setLanguage = useAppStore((state) => state.setLanguage)
   const isMobile = useIsMobile()
@@ -71,17 +72,22 @@ const MainLayout: React.FC = () => {
     return items
   }, [location.pathname, t])
 
+  // 模型管理只对管理员开放（后端 /llm 也只放行管理员），普通成员的菜单里不显示
   const menuItems = [
     {
       key: 'works',
       icon: <VideoCameraOutlined />,
       label: <Link to="/works">{t('menu.works')}</Link>,
     },
-    {
-      key: 'models',
-      icon: <ApiOutlined />,
-      label: <Link to="/models">{t('menu.models')}</Link>,
-    },
+    ...(user?.is_admin
+      ? [
+          {
+            key: 'models',
+            icon: <ApiOutlined />,
+            label: <Link to="/models">{t('menu.models')}</Link>,
+          },
+        ]
+      : []),
     {
       key: 'settings',
       icon: <SettingOutlined />,
@@ -102,7 +108,7 @@ const MainLayout: React.FC = () => {
       key: 'logout',
       label: t('user.logout'),
       onClick: () => {
-        // 这里保留占位，实际项目中可接入登录逻辑
+        void logout().then(() => navigate('/login', { replace: true }))
       },
     },
   ]
@@ -239,8 +245,8 @@ const MainLayout: React.FC = () => {
               <div className="flex items-center gap-2 cursor-pointer">
                 <Avatar size={isMobile ? 28 : 32} icon={<UserOutlined />} />
                 <div className="hidden md:flex flex-col leading-tight">
-                  <span className="text-sm font-medium text-gray-800">{user.name}</span>
-                  <span className="text-xs text-gray-500">{user.role}</span>
+                  <span className="text-sm font-medium text-gray-800" data-testid="current-user">{user?.display_name || user?.email}</span>
+                  <span className="text-xs text-gray-500">{user?.is_admin ? '管理员' : '成员'}</span>
                 </div>
               </div>
             </Dropdown>

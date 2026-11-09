@@ -17,6 +17,9 @@ declare global {
  */
 export function initOpenAPI(base: string = '') {
   OpenAPI.BASE = base
+  // 会话是 HttpOnly cookie：同源时浏览器自动带上；本地开发前后端端口不同，需要显式携带凭证
+  OpenAPI.WITH_CREDENTIALS = true
+  OpenAPI.CREDENTIALS = 'include'
 }
 
 const runtimeBackendUrl = window.__ENV?.BACKEND_URL

@@ -6,6 +6,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { StudioChaptersService, StudioProjectsService } from '../../services/generated'
 import type { ChapterRead, ProjectRead } from '../../services/generated'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { extractErrorText, localizeErrorMessage } from '../../utils/errorMessage'
 import { useTaskPageContext } from '../aiStudio/components/taskPageContext'
 import DirectorRail, { STEP_TIPS, type RailPrimary } from './DirectorRail'
 import StepBar from './StepBar'
@@ -70,7 +71,7 @@ const CreatorPage: React.FC = () => {
       setChapters(c.data?.items ?? [])
       setMetaError(null)
     } catch (e) {
-      setMetaError(e instanceof Error ? e.message : '加载作品失败')
+      setMetaError(localizeErrorMessage(extractErrorText(e), '加载作品失败'))
     } finally {
       setLoadingMeta(false)
     }

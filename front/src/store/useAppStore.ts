@@ -1,39 +1,20 @@
 import { create } from 'zustand'
 import type { SupportedLanguage } from '../i18n'
 
-interface UserInfo {
-  name: string
-  role: string
-}
-
+/** 界面级状态：侧栏折叠与语言。登录用户由 `auth/AuthContext` 管理，不放这里。 */
 interface AppState {
   siderCollapsed: boolean
-  user: UserInfo
   language: SupportedLanguage
-  setUser: (user: Partial<UserInfo>) => void
   setLanguage: (lang: SupportedLanguage) => void
   toggleSider: () => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
   siderCollapsed: false,
-  user: {
-    name: '管理员',
-    role: '系统管理员',
-  },
   language: 'zh-CN',
-  setUser: (user) =>
-    set((state) => ({
-      user: {
-        ...state.user,
-        ...user,
-      },
-    })),
   setLanguage: (lang) => set(() => ({ language: lang })),
   toggleSider: () =>
     set((state) => ({
       siderCollapsed: !state.siderCollapsed,
     })),
 }))
-
-
