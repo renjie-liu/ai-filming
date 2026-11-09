@@ -15,12 +15,18 @@ from app.models.users import User
 from app.schemas.auth import (
     AuthStatusRead,
     LoginRequest,
+    PasswordChangeRequest,
     RegisterRequest,
     RegistrationSettingsRead,
     RegistrationSettingsUpdate,
     UserRead,
 )
-from app.schemas.common import ApiResponse, created_response, empty_response, success_response
+from app.schemas.common import (
+    ApiResponse,
+    created_response,
+    empty_response,
+    success_response,
+)
 from app.services import auth as auth_service
 
 router = APIRouter()
@@ -85,6 +91,15 @@ async def logout(response: Response) -> ApiResponse[None]:
 @router.get("/me", response_model=ApiResponse[UserRead], summary="当前登录用户")
 async def me(user: User = Depends(require_user)) -> ApiResponse[UserRead]:
     return success_response(UserRead.model_validate(user))
+
+
+@router.post("/password", response_model=ApiResponse[None], summary="修改当前用户的密码")
+async def change_password(body: PasswordChangeRequest, user: User = Depends(require_user), db: AsyncSession = Depends(get_db)) -> ApiResponse[None]:
+    try:
+        await auth_service.change_password(db, user=user, current_password=body.current_password, new_password=body.new_password)
+    except auth_service.AuthError as exc:
+        _raise(exc)
+    return empty_response()
 
 
 @router.get("/settings", response_model=ApiResponse[RegistrationSettingsRead], summary="注册设置（管理员）")

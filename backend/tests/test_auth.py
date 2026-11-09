@@ -201,3 +201,15 @@ def test_first_admin_adopts_legacy_projects_and_registration_can_be_closed(auth_
     assert regenerated["invite_code"] and regenerated["user_count"] == 2
     users = admin.get("/api/v1/auth/users").json()["data"]
     assert [u["email"] for u in users] == ["admin@example.com", "u2@example.com"]
+
+
+def test_change_password_requires_current_and_takes_effect_on_next_login(auth_app) -> None:
+    client: TestClient = auth_app["client"]()
+    client.post("/api/v1/auth/register", json={"email": "admin@example.com", "password": "password123"})
+    assert client.post("/api/v1/auth/password", json={"current_password": "nope", "new_password": "newpassword456"}).status_code == 403
+    assert client.post("/api/v1/auth/password", json={"current_password": "password123", "new_password": "password123"}).status_code == 400
+    assert client.post("/api/v1/auth/password", json={"current_password": "password123", "new_password": "short"}).status_code == 422
+    assert client.post("/api/v1/auth/password", json={"current_password": "password123", "new_password": "newpassword456"}).status_code == 200
+    client.post("/api/v1/auth/logout")
+    assert client.post("/api/v1/auth/login", json={"email": "admin@example.com", "password": "password123"}).status_code == 401
+    assert client.post("/api/v1/auth/login", json={"email": "admin@example.com", "password": "newpassword456"}).status_code == 200

@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Input, Space, Switch, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Descriptions, Form, Input, Space, Switch, Table, Tag, Typography, message } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { AuthService } from '../services/generated'
@@ -9,13 +9,15 @@ import type { RegistrationSettingsRead, UserRead } from '../services/generated'
 import { useAuth } from '../auth/AuthContext'
 
 /**
- * 系统设置：当前账号信息 + 退出登录；管理员还能管理注册方式（允许 / 关闭、邀请码）并查看用户列表。
+ * 系统设置：当前账号信息 + 修改密码 + 退出登录；管理员还能管理注册方式（允许 / 关闭、邀请码）并查看用户列表。
  * 模型配置在「模型管理」页，这里不重复。
  */
 
 const errorText = (e: unknown, fallback: string) => localizeErrorMessage(extractErrorText(e), fallback)
 
 const formatTime = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : '—')
+
+type PasswordForm = { current_password: string; new_password: string; confirm: string }
 
 const Settings: React.FC = () => {
   const { user, logout } = useAuth()
@@ -24,6 +26,8 @@ const Settings: React.FC = () => {
   const [users, setUsers] = useState<UserRead[]>([])
   const [saving, setSaving] = useState(false)
   const [codeDraft, setCodeDraft] = useState('')
+  const [pwForm] = Form.useForm<PasswordForm>()
+  const [pwSaving, setPwSaving] = useState(false)
 
   const loadAdmin = useCallback(async () => {
     if (!user?.is_admin) return
@@ -55,6 +59,19 @@ const Settings: React.FC = () => {
     }
   }
 
+  const changePassword = async (values: PasswordForm) => {
+    setPwSaving(true)
+    try {
+      await AuthService.changePasswordApiV1AuthPasswordPost({ requestBody: { current_password: values.current_password, new_password: values.new_password } })
+      message.success('密码已更新')
+      pwForm.resetFields()
+    } catch (e) {
+      message.error(errorText(e, '修改密码失败'))
+    } finally {
+      setPwSaving(false)
+    }
+  }
+
   const doLogout = async () => {
     await logout()
     navigate('/login', { replace: true })
@@ -72,6 +89,31 @@ const Settings: React.FC = () => {
             <Descriptions.Item label="角色">{user.is_admin ? <Tag color="gold">管理员</Tag> : <Tag>成员</Tag>}</Descriptions.Item>
             <Descriptions.Item label="最近登录">{formatTime(user.last_login_at)}</Descriptions.Item>
           </Descriptions>
+        </Card>
+
+        <Card title="修改密码">
+          <Form<PasswordForm> form={pwForm} layout="vertical" onFinish={(v) => void changePassword(v)} requiredMark={false} className="max-w-[420px]">
+            <Form.Item name="current_password" label="当前密码" rules={[{ required: true, message: '请输入当前密码' }]}>
+              <Input.Password autoComplete="current-password" data-testid="pw-current" />
+            </Form.Item>
+            <Form.Item name="new_password" label="新密码" rules={[{ required: true, message: '请设置新密码' }, { min: 8, message: '至少 8 位' }]}>
+              <Input.Password autoComplete="new-password" data-testid="pw-new" />
+            </Form.Item>
+            <Form.Item
+              name="confirm"
+              label="再输一次新密码"
+              dependencies={['new_password']}
+              rules={[
+                { required: true, message: '请再输入一次新密码' },
+                ({ getFieldValue }) => ({
+                  validator: (_, value) => (!value || value === getFieldValue('new_password') ? Promise.resolve() : Promise.reject(new Error('两次输入的密码不一致'))),
+                }),
+              ]}
+            >
+              <Input.Password autoComplete="new-password" data-testid="pw-confirm" />
+            </Form.Item>
+            <Button type="primary" htmlType="submit" loading={pwSaving} data-testid="pw-submit">更新密码</Button>
+          </Form>
         </Card>
 
         {user.is_admin && (

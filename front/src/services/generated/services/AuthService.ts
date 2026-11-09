@@ -8,6 +8,7 @@ import type { ApiResponse_NoneType_ } from '../models/ApiResponse_NoneType_';
 import type { ApiResponse_RegistrationSettingsRead_ } from '../models/ApiResponse_RegistrationSettingsRead_';
 import type { ApiResponse_UserRead_ } from '../models/ApiResponse_UserRead_';
 import type { LoginRequest } from '../models/LoginRequest';
+import type { PasswordChangeRequest } from '../models/PasswordChangeRequest';
 import type { RegisterRequest } from '../models/RegisterRequest';
 import type { RegistrationSettingsUpdate } from '../models/RegistrationSettingsUpdate';
 import type { CancelablePromise } from '../core/CancelablePromise';
@@ -85,6 +86,26 @@ export class AuthService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/auth/me',
+        });
+    }
+    /**
+     * 修改当前用户的密码
+     * @returns ApiResponse_NoneType_ Successful Response
+     * @throws ApiError
+     */
+    public static changePasswordApiV1AuthPasswordPost({
+        requestBody,
+    }: {
+        requestBody: PasswordChangeRequest,
+    }): CancelablePromise<ApiResponse_NoneType_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/auth/password',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
         });
     }
     /**

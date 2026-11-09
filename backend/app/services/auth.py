@@ -261,3 +261,15 @@ async def ensure_shot_access(db: AsyncSession, *, user: User, shot_id: str) -> S
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=entity_not_found("Shot"))
     await ensure_chapter_access(db, user=user, chapter_id=shot.chapter_id)
     return shot
+
+
+async def change_password(db: AsyncSession, *, user: User, current_password: str, new_password: str) -> None:
+    """改密码：先核对当前密码；新密码至少 8 位且不能与当前相同。已签发的会话继续有效（令牌不绑定密码）。"""
+    if not verify_password(current_password or "", user.password_hash):
+        raise AuthError("当前密码不正确", status_code=status.HTTP_403_FORBIDDEN)
+    if len(new_password or "") < 8:
+        raise AuthError("新密码至少 8 位")
+    if verify_password(new_password, user.password_hash):
+        raise AuthError("新密码不能与当前密码相同")
+    user.password_hash = hash_password(new_password)
+    await db.flush()

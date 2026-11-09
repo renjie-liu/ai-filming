@@ -42,6 +42,11 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=128)
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128, description="当前密码")
+    new_password: str = Field(..., min_length=8, max_length=128, description="新密码（至少 8 位）")
+
+
 class RegistrationSettingsRead(BaseModel):
     """管理员可见的注册设置。"""
 

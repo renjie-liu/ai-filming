@@ -182,6 +182,7 @@ export type { PaginatedData_ShotLinkedAssetItem_ } from './models/PaginatedData_
 export type { PaginatedData_ShotRead_ } from './models/PaginatedData_ShotRead_';
 export type { PaginatedData_TaskListItemRead_ } from './models/PaginatedData_TaskListItemRead_';
 export type { Pagination } from './models/Pagination';
+export type { PasswordChangeRequest } from './models/PasswordChangeRequest';
 export type { PreviewGridRequest } from './models/PreviewGridRequest';
 export type { ProjectActorLinkRead } from './models/ProjectActorLinkRead';
 export type { ProjectAssetLinkCreate } from './models/ProjectAssetLinkCreate';
