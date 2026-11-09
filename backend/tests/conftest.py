@@ -16,6 +16,27 @@ except Exception:  # noqa: BLE001
     app = None
 
 
+@pytest.fixture(autouse=True)
+def _signed_in_admin():
+    """业务接口现在都要求登录：默认把每个测试当作已登录的管理员，登录相关的测试自行移除这个覆盖。"""
+    if app is None:
+        yield
+        return
+    from app.dependencies import get_current_user_optional
+    from app.models.users import User
+
+    admin = User(id="test-admin", email="admin@test.local", password_hash="x", display_name="测试管理员", is_admin=True, is_active=True)
+
+    async def _override():
+        return admin
+
+    app.dependency_overrides[get_current_user_optional] = _override
+    try:
+        yield admin
+    finally:
+        app.dependency_overrides.pop(get_current_user_optional, None)
+
+
 @pytest.fixture
 def client() -> TestClient:
     """FastAPI 应用 TestClient，用于集成测试。"""

@@ -54,6 +54,13 @@ class Project(Base, TimestampMixin):
         default=None,
         comment="用户自定义的风格补充描述，拼在预设风格提示词之后进入所有图片 / 视频提示词",
     )
+    owner_id: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        default=None,
+        index=True,
+        comment="所属用户 ID（users.id）；有账号系统之前创建的作品为空，首个注册的管理员接管",
+    )
     stats: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, comment="聚合统计（JSON）")
 
     chapters: Mapped[list["Chapter"]] = relationship(

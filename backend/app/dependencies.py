@@ -2,11 +2,13 @@
 
 from collections.abc import AsyncGenerator
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.db import async_session_maker
+from app.models.users import User
 from app.services.llm.resolver import build_default_text_llm
 
 
@@ -21,6 +23,34 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+
+async def get_current_user_optional(request: Request, db: AsyncSession = Depends(get_db)) -> User | None:
+    """从会话 cookie（或 `Authorization: Bearer`，便于脚本调用）解析当前用户；没有或无效返回 None。"""
+    token = request.cookies.get(settings.auth_cookie_name)
+    if not token:
+        header = request.headers.get("authorization") or ""
+        if header.lower().startswith("bearer "):
+            token = header[7:].strip()
+    if not token:
+        return None
+    from app.services.auth import resolve_user_from_token
+
+    return await resolve_user_from_token(db, token)
+
+
+async def require_user(user: User | None = Depends(get_current_user_optional)) -> User:
+    """需要登录的接口依赖；未登录返回 401，前端据此跳转登录页。"""
+    if user is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    return user
+
+
+async def require_admin(user: User = Depends(require_user)) -> User:
+    """管理员专用（注册设置、模型配置）。"""
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return user
 
 
 async def get_llm(db: AsyncSession = Depends(get_db)) -> BaseChatModel:

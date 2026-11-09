@@ -7,22 +7,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.utils import apply_keyword_filter, apply_order, paginate
-from app.dependencies import get_db
+from app.dependencies import get_db, require_user
 from app.models.studio import Project
 from app.models.types import ProjectStyle, ProjectVisualStyle
-from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, paginated_response, success_response
-from app.services.common import (
-    create_and_refresh,
-    delete_if_exists,
-    entity_already_exists,
-    entity_not_found,
-    ensure_not_exists,
-    flush_and_refresh,
-    get_or_404,
-    patch_model,
+from app.models.users import User
+from app.schemas.common import (
+    ApiResponse,
+    PaginatedData,
+    created_response,
+    empty_response,
+    paginated_response,
+    success_response,
 )
 from app.schemas.studio.creator import ProjectOverviewRead
-from app.services.studio.creator_flow import build_projects_overview
 from app.schemas.studio.projects import (
     ProjectCreate,
     ProjectRead,
@@ -31,6 +28,16 @@ from app.schemas.studio.projects import (
     StyleOption,
     StylePresetRead,
 )
+from app.services.auth import ensure_project_access, visible_projects_clause
+from app.services.common import (
+    create_and_refresh,
+    delete_if_exists,
+    ensure_not_exists,
+    entity_already_exists,
+    flush_and_refresh,
+    patch_model,
+)
+from app.services.studio.creator_flow import build_projects_overview
 from app.services.studio.style_presets import (
     STYLE_GROUPS,
     default_style_preset_key,
@@ -94,8 +101,8 @@ def _validate_project_style_combo(*, visual_style: ProjectVisualStyle, style: Pr
     response_model=ApiResponse[list[ProjectOverviewRead]],
     summary="创作模式：作品列表（含章节 / 镜头 / 关键帧 / 视频计数与封面）",
 )
-async def list_projects_overview(db: AsyncSession = Depends(get_db)) -> ApiResponse[list[ProjectOverviewRead]]:
-    return success_response(await build_projects_overview(db))
+async def list_projects_overview(db: AsyncSession = Depends(get_db), user: User = Depends(require_user)) -> ApiResponse[list[ProjectOverviewRead]]:
+    return success_response(await build_projects_overview(db, user=user))
 
 
 @router.get(
@@ -144,8 +151,12 @@ async def list_projects(
     is_desc: bool = Query(False, description="是否倒序"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    user: User = Depends(require_user),
 ) -> ApiResponse[PaginatedData[ProjectRead]]:
     stmt = select(Project)
+    clause = visible_projects_clause(user)
+    if clause is not None:
+        stmt = stmt.where(clause)
     stmt = apply_keyword_filter(stmt, q=q, fields=[Project.name, Project.description])
     stmt = apply_order(stmt, model=Project, order=order, is_desc=is_desc, allow_fields=PROJECT_ORDER_FIELDS, default="created_at")
     items, total = await paginate(db, stmt=stmt, page=page, page_size=page_size)
@@ -161,6 +172,7 @@ async def list_projects(
 async def create_project(
     body: ProjectCreate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ProjectRead]:
     await ensure_not_exists(
         db,
@@ -169,6 +181,7 @@ async def create_project(
         detail=entity_already_exists("Project"),
     )
     data = body.model_dump()
+    data["owner_id"] = user.id
     try:
         _apply_style_preset(data)
         _validate_project_style_combo(visual_style=data["visual_style"], style=data["style"])
@@ -186,8 +199,9 @@ async def create_project(
 async def get_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ProjectRead]:
-    obj = await get_or_404(db, Project, project_id, detail=entity_not_found("Project"))
+    obj = await ensure_project_access(db, user=user, project_id=project_id)
     return success_response(ProjectRead.model_validate(obj))
 
 
@@ -200,8 +214,9 @@ async def update_project(
     project_id: str,
     body: ProjectUpdate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ProjectRead]:
-    obj = await get_or_404(db, Project, project_id, detail=entity_not_found("Project"))
+    obj = await ensure_project_access(db, user=user, project_id=project_id)
     update_data = body.model_dump(exclude_unset=True)
     try:
         _apply_style_preset(update_data)
@@ -227,6 +242,8 @@ async def update_project(
 async def delete_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[None]:
+    await ensure_project_access(db, user=user, project_id=project_id)
     await delete_if_exists(db, Project, project_id)
     return empty_response()

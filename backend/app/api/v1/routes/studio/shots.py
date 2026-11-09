@@ -4,54 +4,64 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
-from app.services.studio.shot_assets import (
-    create_project_asset_link as create_project_asset_link_service,
-    delete_project_asset_link as delete_project_asset_link_service,
-    list_project_asset_links_paginated,
-    list_shot_linked_assets_paginated,
+from app.dependencies import get_db, require_user
+from app.models.users import User
+from app.schemas.common import (
+    ApiResponse,
+    PaginatedData,
+    created_response,
+    empty_response,
+    success_response,
 )
-from app.services.studio.shot_details import (
-    create as create_shot_detail_service,
-    get as get_shot_detail_service,
-    list_paginated as list_shot_details_paginated,
-    update as update_shot_detail_service,
-    delete as delete_shot_detail_service,
+from app.schemas.skills.script_processing import StudioScriptExtractionDraft
+from app.schemas.studio.shots import (
+    ProjectActorLinkRead,
+    ProjectAssetLinkCreate,
+    ProjectCostumeLinkRead,
+    ProjectPropLinkRead,
+    ProjectSceneLinkRead,
+    ShotAssetsOverviewRead,
+    ShotCreate,
+    ShotDetailCreate,
+    ShotDetailRead,
+    ShotDetailUpdate,
+    ShotDialogLineCreate,
+    ShotDialogLineRead,
+    ShotDialogLineUpdate,
+    ShotExtractedCandidateLinkRequest,
+    ShotExtractedCandidateRead,
+    ShotExtractedDialogueCandidateAcceptRequest,
+    ShotExtractedDialogueCandidateRead,
+    ShotFrameImageCreate,
+    ShotFrameImageRead,
+    ShotFrameImageUpdate,
+    ShotLinkedAssetItem,
+    ShotPreparationLinkRequest,
+    ShotPreparationMutationAction,
+    ShotPreparationMutationResultRead,
+    ShotPreparationStateRead,
+    ShotRead,
+    ShotRuntimeSummaryRead,
+    ShotSkipExtractionUpdate,
+    ShotUpdate,
+    ShotVideoPromptPreviewRead,
+    ShotVideoReadinessRead,
 )
-from app.services.studio.shot_dialogs import (
-    create as create_shot_dialog_line_service,
-    list_paginated as list_shot_dialog_lines_paginated,
-    update as update_shot_dialog_line_service,
-    delete as delete_shot_dialog_line_service,
-)
-from app.services.studio.shot_frames import (
-    create as create_shot_frame_image_service,
-    delete as delete_shot_frame_image_service,
-    list_paginated as list_shot_frame_images_paginated,
-    update as update_shot_frame_image_service,
-)
-from app.services.studio.shots import (
-    build_shot_read,
-    create as create_shot_service,
-    delete as delete_shot_service,
-    get as get_shot_service,
-    list_paginated as list_shots_paginated,
-    update as update_shot_service,
-)
+from app.services.auth import ensure_chapter_access, ensure_shot_access
 from app.services.studio import (
     accept_shot_extracted_dialogue_candidate,
     build_shot_preparation_state,
     get_shot_assets_overview,
+    get_shot_video_readiness,
     ignore_shot_extracted_candidate,
     ignore_shot_extracted_dialogue_candidate,
     link_existing_asset_for_preparation,
     link_shot_extracted_candidate,
     list_shot_extracted_candidates,
     list_shot_extracted_dialogue_candidates,
-    get_shot_video_readiness,
     list_shot_runtime_summary_by_chapter,
     set_skip_extraction,
 )
@@ -60,42 +70,78 @@ from app.services.studio.generation.video import (
     build_video_context,
     derive_video_preview,
 )
-from app.services.studio.generation.video.derive_preview import to_shot_video_prompt_preview_read
-from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, success_response
-from app.schemas.skills.script_processing import StudioScriptExtractionDraft
-from app.services.studio.shot_extraction_draft import build_script_extraction_draft_for_shot
-from app.schemas.studio.shots import (
-    ProjectActorLinkRead,
-    ProjectAssetLinkCreate,
-    ProjectCostumeLinkRead,
-    ShotAssetsOverviewRead,
-    ShotLinkedAssetItem,
-    ShotCreate,
-    ShotDetailCreate,
-    ShotDetailRead,
-    ShotDetailUpdate,
-    ShotDialogLineCreate,
-    ShotDialogLineRead,
-    ShotDialogLineUpdate,
-    ProjectPropLinkRead,
-    ShotRead,
-    ShotRuntimeSummaryRead,
-    ProjectSceneLinkRead,
-    ShotUpdate,
-    ShotFrameImageCreate,
-    ShotFrameImageRead,
-    ShotFrameImageUpdate,
-    ShotExtractedCandidateLinkRequest,
-    ShotExtractedCandidateRead,
-    ShotExtractedDialogueCandidateAcceptRequest,
-    ShotExtractedDialogueCandidateRead,
-    ShotPreparationMutationAction,
-    ShotPreparationLinkRequest,
-    ShotPreparationMutationResultRead,
-    ShotPreparationStateRead,
-    ShotSkipExtractionUpdate,
-    ShotVideoReadinessRead,
-    ShotVideoPromptPreviewRead,
+from app.services.studio.generation.video.derive_preview import (
+    to_shot_video_prompt_preview_read,
+)
+from app.services.studio.shot_assets import (
+    create_project_asset_link as create_project_asset_link_service,
+)
+from app.services.studio.shot_assets import (
+    delete_project_asset_link as delete_project_asset_link_service,
+)
+from app.services.studio.shot_assets import (
+    list_project_asset_links_paginated,
+    list_shot_linked_assets_paginated,
+)
+from app.services.studio.shot_details import (
+    create as create_shot_detail_service,
+)
+from app.services.studio.shot_details import (
+    delete as delete_shot_detail_service,
+)
+from app.services.studio.shot_details import (
+    get as get_shot_detail_service,
+)
+from app.services.studio.shot_details import (
+    list_paginated as list_shot_details_paginated,
+)
+from app.services.studio.shot_details import (
+    update as update_shot_detail_service,
+)
+from app.services.studio.shot_dialogs import (
+    create as create_shot_dialog_line_service,
+)
+from app.services.studio.shot_dialogs import (
+    delete as delete_shot_dialog_line_service,
+)
+from app.services.studio.shot_dialogs import (
+    list_paginated as list_shot_dialog_lines_paginated,
+)
+from app.services.studio.shot_dialogs import (
+    update as update_shot_dialog_line_service,
+)
+from app.services.studio.shot_extraction_draft import (
+    build_script_extraction_draft_for_shot,
+)
+from app.services.studio.shot_frames import (
+    create as create_shot_frame_image_service,
+)
+from app.services.studio.shot_frames import (
+    delete as delete_shot_frame_image_service,
+)
+from app.services.studio.shot_frames import (
+    list_paginated as list_shot_frame_images_paginated,
+)
+from app.services.studio.shot_frames import (
+    update as update_shot_frame_image_service,
+)
+from app.services.studio.shots import (
+    build_shot_read,
+)
+from app.services.studio.shots import (
+    create as create_shot_service,
+)
+from app.services.studio.shots import (
+    delete as delete_shot_service,
+)
+from app.services.studio.shots import (
+    get as get_shot_service,
+)
+from app.services.studio.shots import (
+    list_paginated as list_shots_paginated,
+)
+from app.services.studio.shots import (
+    update as update_shot_service,
 )
 
 router = APIRouter()
@@ -127,7 +173,12 @@ async def list_shots(
     is_desc: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    user: User = Depends(require_user),
 ) -> ApiResponse[PaginatedData[ShotRead]]:
+    if chapter_id:
+        await ensure_chapter_access(db, user=user, chapter_id=chapter_id)
+    elif not user.is_admin:
+        raise HTTPException(status_code=400, detail="chapter_id is required")
     return await list_shots_paginated(
         db,
         chapter_id=chapter_id,
@@ -149,7 +200,9 @@ async def list_shots(
 async def create_shot(
     body: ShotCreate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ShotRead]:
+    await ensure_chapter_access(db, user=user, chapter_id=body.chapter_id)
     obj = await create_shot_service(db, body=body)
     return created_response(await build_shot_read(db, shot=obj))
 
@@ -410,7 +463,9 @@ async def ignore_extracted_dialogue_candidate(
 async def get_shot(
     shot_id: str,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ShotRead]:
+    await ensure_shot_access(db, user=user, shot_id=shot_id)
     obj = await get_shot_service(db, shot_id=shot_id)
     return success_response(await build_shot_read(db, shot=obj))
 
@@ -424,7 +479,9 @@ async def update_shot(
     shot_id: str,
     body: ShotUpdate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ShotRead]:
+    await ensure_shot_access(db, user=user, shot_id=shot_id)
     obj = await update_shot_service(db, shot_id=shot_id, body=body)
     return success_response(await build_shot_read(db, shot=obj))
 
@@ -437,7 +494,9 @@ async def update_shot(
 async def delete_shot(
     shot_id: str,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[None]:
+    await ensure_shot_access(db, user=user, shot_id=shot_id)
     await delete_shot_service(db, shot_id=shot_id)
     return empty_response()
 

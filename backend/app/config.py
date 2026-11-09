@@ -154,6 +154,11 @@ class Settings(BaseSettings):
     ark_image_model: str | None = None
     ark_video_model: str | None = None
 
+    # 账号系统：会话签名密钥（不填则首次启动时生成并存入启动元数据表）、cookie 名、会话有效期
+    auth_secret: str | None = None
+    auth_cookie_name: str = "jellyfish_session"
+    auth_session_days: int = 30
+
     def model_post_init(self, __context: object) -> None:
         if (not self.celery_broker_url or not str(self.celery_broker_url).strip()) and is_vercel_runtime():
             # Vercel 上使用 Vercel Queues 作为 Celery broker（vercel-celery 集成）。

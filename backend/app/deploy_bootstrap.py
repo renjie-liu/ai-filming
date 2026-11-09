@@ -40,6 +40,7 @@ def _import_all_models() -> None:
     import app.models.studio  # noqa: F401
     import app.models.task  # noqa: F401
     import app.models.task_links  # noqa: F401
+    import app.models.users  # noqa: F401
 
 
 def _schema_fingerprint() -> str:
@@ -395,6 +396,12 @@ async def run_deploy_bootstrap() -> dict[str, Any]:
         from app.services.studio.shot_detail_defaults import backfill_missing_shot_details
 
         details_backfilled = await backfill_missing_shot_details(session)
+        await session.commit()
+    async with async_session_maker() as session:
+        # 会话签名密钥：没配 AUTH_SECRET 时在这里（建表后、建议锁已释放）生成一次，避免首个请求里并发生成两把
+        from app.services.auth import get_auth_secret
+
+        await get_auth_secret(session)
         await session.commit()
     summary = {
         "schema_created": created,

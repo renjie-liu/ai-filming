@@ -7,22 +7,34 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.utils import apply_keyword_filter, apply_order, paginate
-from app.dependencies import get_db
+from app.dependencies import get_db, require_user
 from app.models.studio import Chapter, Project, Shot
-from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, paginated_response, success_response
+from app.models.users import User
+from app.schemas.common import (
+    ApiResponse,
+    PaginatedData,
+    created_response,
+    empty_response,
+    paginated_response,
+    success_response,
+)
+from app.schemas.studio.creator import AutoConfirmResultRead, CreatorBoardRead
+from app.schemas.studio.projects import ChapterCreate, ChapterRead, ChapterUpdate
+from app.services.auth import (
+    ensure_chapter_access,
+    ensure_project_access,
+    visible_projects_clause,
+)
 from app.services.common import (
     create_and_refresh,
     delete_if_exists,
+    ensure_not_exists,
     entity_already_exists,
     entity_not_found,
-    ensure_not_exists,
     flush_and_refresh,
-    get_or_404,
     patch_model,
     require_entity,
 )
-from app.schemas.studio.projects import ChapterCreate, ChapterRead, ChapterUpdate
-from app.schemas.studio.creator import AutoConfirmResultRead, CreatorBoardRead
 from app.services.studio.creator_flow import auto_confirm_chapter, build_creator_board
 
 router = APIRouter()
@@ -43,10 +55,16 @@ async def list_chapters(
     is_desc: bool = Query(False, description="是否倒序"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    user: User = Depends(require_user),
 ) -> ApiResponse[PaginatedData[ChapterRead]]:
     stmt = select(Chapter)
     if project_id:
+        await ensure_project_access(db, user=user, project_id=project_id)
         stmt = stmt.where(Chapter.project_id == project_id)
+    else:
+        clause = visible_projects_clause(user)
+        if clause is not None:
+            stmt = stmt.join(Project, Chapter.project_id == Project.id).where(clause)
     stmt = apply_keyword_filter(stmt, q=q, fields=[Chapter.title, Chapter.summary])
     stmt = apply_order(
         stmt,
@@ -89,6 +107,7 @@ async def list_chapters(
 async def create_chapter(
     body: ChapterCreate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ChapterRead]:
     await ensure_not_exists(
         db,
@@ -103,6 +122,7 @@ async def create_chapter(
         detail=entity_not_found("Project"),
         status_code=400,
     )
+    await ensure_project_access(db, user=user, project_id=body.project_id)
     obj = await create_and_refresh(db, Chapter(**body.model_dump()))
     return created_response(ChapterRead.model_validate(obj))
 
@@ -115,8 +135,9 @@ async def create_chapter(
 async def get_chapter(
     chapter_id: str,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ChapterRead]:
-    obj = await get_or_404(db, Chapter, chapter_id, detail=entity_not_found("Chapter"))
+    obj = await ensure_chapter_access(db, user=user, chapter_id=chapter_id)
     count_stmt = select(func.count(Shot.id)).where(Shot.chapter_id == chapter_id)
     res = await db.execute(count_stmt)
     shot_count = int(res.scalar() or 0)
@@ -132,8 +153,9 @@ async def update_chapter(
     chapter_id: str,
     body: ChapterUpdate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ChapterRead]:
-    obj = await get_or_404(db, Chapter, chapter_id, detail=entity_not_found("Chapter"))
+    obj = await ensure_chapter_access(db, user=user, chapter_id=chapter_id)
     update = body.model_dump(exclude_unset=True)
     if "project_id" in update:
         await require_entity(
@@ -143,6 +165,7 @@ async def update_chapter(
             detail=entity_not_found("Project"),
             status_code=400,
         )
+        await ensure_project_access(db, user=user, project_id=update["project_id"])
     patch_model(obj, update)
     await flush_and_refresh(db, obj)
     return success_response(ChapterRead.model_validate(obj))
@@ -156,7 +179,9 @@ async def update_chapter(
 async def delete_chapter(
     chapter_id: str,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[None]:
+    await ensure_chapter_access(db, user=user, chapter_id=chapter_id)
     await delete_if_exists(db, Chapter, chapter_id)
     return empty_response()
 
@@ -169,8 +194,10 @@ async def delete_chapter(
 async def auto_confirm_chapter_api(
     chapter_id: str,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[AutoConfirmResultRead]:
     """把「提取确认」自动化；状态语义不变，处理后镜头按原规则进入 ready。"""
+    await ensure_chapter_access(db, user=user, chapter_id=chapter_id)
     try:
         result = await auto_confirm_chapter(db, chapter_id=chapter_id)
     except ValueError as exc:
@@ -187,7 +214,9 @@ async def auto_confirm_chapter_api(
 async def get_creator_board_api(
     chapter_id: str,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[CreatorBoardRead]:
+    await ensure_chapter_access(db, user=user, chapter_id=chapter_id)
     try:
         board = await build_creator_board(db, chapter_id=chapter_id)
     except ValueError as exc:

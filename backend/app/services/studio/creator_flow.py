@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import re
-
 import uuid
 from collections import defaultdict
 from typing import Any
@@ -51,6 +50,7 @@ from app.models.studio_file_usages import FileUsage
 from app.models.task import GenerationTask
 from app.models.task_links import GenerationTaskLink
 from app.models.types import FileUsageKind
+from app.models.users import User
 from app.schemas.studio.creator import (
     AutoConfirmResultRead,
     CreatorBoardRead,
@@ -66,10 +66,10 @@ from app.schemas.studio.creator import (
     ProjectOverviewRead,
 )
 from app.schemas.studio.shots import ShotLinkedAssetItem
+from app.services.auth import visible_projects_clause
 from app.services.common import entity_not_found
 from app.services.studio.entity_crud import create_entity
 from app.services.studio.entity_thumbnails import download_url
-from app.services.worker.async_task_support import fail_stale_inline_tasks
 from app.services.studio.file_usages import sync_usage_from_shot_context
 from app.services.studio.generation.asset_image import (
     build_asset_image_context,
@@ -96,11 +96,12 @@ from app.services.studio.shot_preparation_state import (
     link_existing_asset_for_preparation,
 )
 from app.services.studio.shot_status import recompute_shot_status
-from app.services.studio.style_presets import style_label
 from app.services.studio.shot_video_prompt_pack import (
     build_preview_grid_prompt,
     build_shot_video_prompt_pack,
 )
+from app.services.studio.style_presets import style_label
+from app.services.worker.async_task_support import fail_stale_inline_tasks
 from app.utils.project_links import upsert_project_link
 
 # 候选类型 → 实体模型 / 项目关联模型 / 图片模型 / 图片表上的外键字段
@@ -1100,9 +1101,13 @@ async def attach_shot_audio(db: AsyncSession, *, shot_id: str, file_id: str | No
 # ---------------------------------------------------------------------------
 
 
-async def build_projects_overview(db: AsyncSession) -> list[ProjectOverviewRead]:
-    """作品卡片：章节 / 镜头 / 关键帧 / 视频计数、封面与最近章节。"""
-    projects = list((await db.execute(select(Project).order_by(Project.updated_at.desc()))).scalars().all())
+async def build_projects_overview(db: AsyncSession, *, user: User | None = None) -> list[ProjectOverviewRead]:
+    """作品卡片：章节 / 镜头 / 关键帧 / 视频计数、封面与最近章节；给了 `user` 时只列他可见的作品（见 `visible_projects_clause`）。"""
+    stmt = select(Project).order_by(Project.updated_at.desc())
+    clause = visible_projects_clause(user) if user is not None else None
+    if clause is not None:
+        stmt = stmt.where(clause)
+    projects = list((await db.execute(stmt)).scalars().all())
     if not projects:
         return []
     chapters = list((await db.execute(select(Chapter).order_by(Chapter.updated_at.desc()))).scalars().all())

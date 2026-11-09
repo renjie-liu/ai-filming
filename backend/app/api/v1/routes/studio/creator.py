@@ -9,7 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
+from app.dependencies import get_db, require_user
+from app.models.users import User
 from app.schemas.common import (
     ApiResponse,
     created_response,
@@ -31,6 +32,7 @@ from app.schemas.studio.creator import (
     TaskIdRead,
     TaskIdsRead,
 )
+from app.services.auth import ensure_chapter_access, ensure_shot_access
 from app.services.studio.creator_flow import (
     CreatorInputError,
     attach_entity_image,
@@ -63,8 +65,10 @@ async def set_shot_links_api(
     shot_id: str,
     body: ShotEntityLinksWrite,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[None]:
     """为 None 的类型保持不变；移除的实体会把同名提取候选标记为 ignored，避免被自动确认挂回。"""
+    await ensure_shot_access(db, user=user, shot_id=shot_id)
     try:
         for entity_type, ids in (
             ("character", body.character_ids),
@@ -91,7 +95,9 @@ async def set_entity_shots_api(
     entity_id: str,
     body: EntityShotsWrite,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[EntityShotsWrite]:
+    await ensure_chapter_access(db, user=user, chapter_id=chapter_id)
     try:
         shot_ids = await set_entity_shots(db, chapter_id=chapter_id, entity_type=entity_type, entity_id=entity_id, shot_ids=body.shot_ids)
     except ValueError as exc:
@@ -109,7 +115,9 @@ async def reorder_chapter_shots_api(
     chapter_id: str,
     body: ShotOrderWrite,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ShotOrderWrite]:
+    await ensure_chapter_access(db, user=user, chapter_id=chapter_id)
     try:
         shot_ids = await reorder_chapter_shots(db, chapter_id=chapter_id, shot_ids=body.shot_ids)
     except ValueError as exc:
@@ -128,7 +136,9 @@ async def create_chapter_entity_api(
     chapter_id: str,
     body: CreatorEntityCreate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[CreatorEntityCreatedRead]:
+    await ensure_chapter_access(db, user=user, chapter_id=chapter_id)
     try:
         entity_id, reused = await create_chapter_entity(
             db, chapter_id=chapter_id, entity_type=body.type, name=body.name, description=body.description, shot_ids=body.shot_ids
@@ -167,7 +177,9 @@ async def attach_shot_keyframe_api(
     shot_id: str,
     body: FileAttachRequest,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[AttachedImageRead]:
+    await ensure_shot_access(db, user=user, shot_id=shot_id)
     try:
         image_id = await attach_shot_keyframe(db, shot_id=shot_id, file_id=body.file_id)
     except ValueError as exc:
@@ -185,7 +197,9 @@ async def attach_shot_video_api(
     shot_id: str,
     body: FileAttachRequest,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[AttachedVideoRead]:
+    await ensure_shot_access(db, user=user, shot_id=shot_id)
     try:
         file_id = await attach_shot_video(db, shot_id=shot_id, file_id=body.file_id)
     except ValueError as exc:
@@ -223,7 +237,9 @@ async def generate_preview_grid_api(
     shot_id: str,
     body: PreviewGridRequest,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[TaskIdRead]:
+    await ensure_shot_access(db, user=user, shot_id=shot_id)
     try:
         task_id = await generate_preview_grid(db, shot_id=shot_id, ratio=body.ratio)
     except ValueError as exc:
@@ -241,7 +257,9 @@ async def attach_shot_audio_api(
     shot_id: str,
     body: FileAttachRequest,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ShotAudioRead]:
+    await ensure_shot_access(db, user=user, shot_id=shot_id)
     try:
         file_id = await attach_shot_audio(db, shot_id=shot_id, file_id=body.file_id)
     except ValueError as exc:
@@ -258,7 +276,9 @@ async def attach_shot_audio_api(
 async def clear_shot_audio_api(
     shot_id: str,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ApiResponse[ShotAudioRead]:
+    await ensure_shot_access(db, user=user, shot_id=shot_id)
     try:
         await attach_shot_audio(db, shot_id=shot_id, file_id=None)
     except ValueError as exc:
