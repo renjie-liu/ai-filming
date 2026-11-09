@@ -8,7 +8,8 @@
 | --- | --- | --- |
 | `/works` | 作品列表 `pages/creator/WorksPage.tsx` | 作品卡片（封面 = 第一张关键帧、风格名、集数 / 镜头 / 视频计数、删除需二次确认）；「新建作品」收集作品名、画面风格（`StylePresetPicker`：按「真人实拍 / 动画 / 艺术」分组的预设卡片 + 可选的「风格补充」一句话）、比例后直接进入创作页；提交时把预设的 `key` / `visual_style` / `style` 一起写入 |
 | `/works/:projectId?chapter=<id>#<step>` | 创作页 `pages/creator/CreatorPage.tsx` | 一页五步：`script` / `cast` / `storyboard` / `video` / `final`；章节用 `?chapter=`，步骤用 hash；首次打开按进度推断步骤 |
-| `/models` `/settings` | 模型管理 / 系统设置 | 运维页面，不参与主流程 |
+| `/login` | 登录 / 注册 `pages/LoginPage.tsx` | 邮箱 + 密码；按 `GET /auth/status` 切换表单：没有用户时只给「创建管理员账号」，需要邀请码时多一栏，关闭注册时只能登录；成功后回到来源页 |
+| `/models` `/settings` | 模型管理 / 系统设置 | 运维页面，不参与主流程；模型管理只对管理员开放（`RequireAdmin`），系统设置含账号信息、退出登录，管理员还有注册方式（允许 / 关闭、邀请码）与用户列表 |
 | `/projects/*` | — | 旧路径，重定向到 `/works` |
 
 侧栏只有 作品 / 模型管理 / 系统设置。任务中心（`pages/aiStudio/components/TaskCenter`）保留为通用任务面板，回跳目标改为创作页对应步骤（`taskCenterMeta.ts`）。
@@ -156,6 +157,15 @@ CreatorPage
 Vercel Services 下静态 `web` 服务不会自己做 SPA 回退，`destination.path` 与服务级 `request.path` transform 都不改变静态文件查找；因此第一条顶层 rewrite 把所有非 `/api/`、非文档、非静态资源（`/assets/`、`env.js`、`logo.svg`、`mockServiceWorker.js`）的路径改写为 `/index.html`，再经 `/(.*)` → `web` 服务命中。直接打开 / 刷新 `/works`、`/works/:id`、`/models` 都能加载应用。
 
 读模型（`app/schemas/studio/creator.py`）使用 `json_schema_serialization_defaults_required=True`，带默认值的字段在响应 schema 中仍为必填，前端类型不再到处可选。
+
+## 用户与权限（`app/services/auth.py`，路由 `routes/auth.py`，前端 `auth/`）
+
+- **账号**：`users` 表，邮箱唯一（统一小写）、密码只存 scrypt 哈希（`core/security.py`，纯标准库）。第一个注册的用户成为管理员，并接管此前没有归属的作品（升级到有账号之前的数据），同时自动生成 8 位邀请码，之后的注册默认需要邀请码。注册模式由 `registration_mode` 推导：没有用户 → `first_admin`；元数据 `auth_registration_enabled=0` → `closed`；有 `auth_invite_code` → `invite`；否则 `open`。管理员通过 `GET/PUT /auth/settings` 改开关 / 邀请码（可重新生成或清空），`GET /auth/users` 看用户列表。
+- **会话**：`POST /auth/register|login` 签发 HMAC-SHA256 令牌（负载 `sub` / `iat` / `exp`，默认 30 天），放在 HttpOnly、SameSite=Lax 的 `jellyfish_session` cookie 里（经 `X-Forwarded-Proto` 判定 https 时带 Secure）；脚本也可用 `Authorization: Bearer <token>`。签名密钥优先环境变量 `AUTH_SECRET`，否则部署引导在建表后生成一把写进 `jellyfish_bootstrap_meta.auth_secret`，零配置可用。`POST /auth/logout` 清 cookie，`GET /auth/me` 取当前用户。
+- **鉴权边界**（`api/v1/__init__.py`）：`/health`、`/_deploy/*`、`/auth/*` 公开；`/system`、`/film`、`/studio`、`/script-processing` 要求登录（`require_user`，未登录 401「请先登录」）；`/llm/*` 只放行管理员（`require_admin`，403）。依赖在 `app/dependencies.py`：`get_current_user_optional` → `require_user` → `require_admin`。
+- **作品归属**：`Project.owner_id`（创建时写入当前用户）。列表 / 概览按 `visible_projects_clause` 过滤：管理员看全部，成员看自己的 + 没有归属的老作品。`ensure_project_access` / `ensure_chapter_access` / `ensure_shot_access`（所有者或管理员，否则 403）用在 projects CRUD、chapters CRUD / auto-confirm / creator-board、creator 编辑路由（镜头关联、实体镜头、排序、新增实体、关键帧 / 视频 / 音频挂载、预演四宫格）与 shots CRUD（`list_shots` 非管理员必须带 `chapter_id`）。实体、文件、任务、提示词模板等子资源目前只要求登录，靠不可猜的随机 ID；细粒度归属检查见 `docs/plans/creator-mode.md`。
+- **前端**：`auth/AuthContext.tsx` 启动时问一次 `/auth/me`，窗口重新可见且距上次超过一分钟再问；401 置空用户。`RequireAuth` 包住 `MainLayout`（登录态未定先转圈，未登录跳 `/login` 并带回跳地址），`RequireAdmin` 包住模型管理；右上角用户菜单显示显示名 / 邮箱与角色，「退出登录」调 `/auth/logout`。OpenAPI 客户端开 `WITH_CREDENTIALS`（本地前后端端口不同也带 cookie）。
+- **测试**：`tests/test_auth.py` 用真实 SQLite 跑注册 / 登录 / 退出、邀请码与开关、归属可见范围、老作品接管；其余接口测试由 `conftest.py` 的 autouse fixture 当作已登录管理员。
 
 ## 状态语义（未改变）
 

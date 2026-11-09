@@ -68,6 +68,15 @@ storage, see [Object storage: Cloudflare R2](#object-storage-cloudflare-r2).
 Without a database URL the API falls back to an ephemeral SQLite file in `/tmp`
 (smoke tests only: data is lost and is not shared between instances).
 
+## Accounts and login
+
+The app requires a login. On the first visit after deploying, the login page offers **创建管理员账号** (create the admin account): the first registered user becomes the admin and takes ownership of every work created before accounts existed. Registration then defaults to invite-only; the admin finds the invite code under 系统设置 → 注册方式 and can regenerate it, clear it (open registration) or disable registration.
+
+- `AUTH_SECRET` (optional): secret used to sign session cookies. If unset, one is generated at first boot and stored in the `jellyfish_bootstrap_meta` table, so nothing needs configuring. Set it explicitly only if you want sessions to survive a database reset or to be valid across several deployments sharing one database.
+- Sessions are HttpOnly `jellyfish_session` cookies (30 days, Secure on https). Scripts can send the same token as `Authorization: Bearer <token>`.
+- The schema upgrade is automatic: the `users` table is created and `projects.owner_id` is added by the bootstrap (`add_missing_columns`) on the first request of the new deployment.
+- Everything under `/api/v1` except `/health`, `/_deploy/*` and `/auth/*` returns 401 without a session; `/api/v1/llm/*` (model management) is admin-only.
+
 ## Object storage: Cloudflare R2
 
 Generated images / videos and user uploads go to an S3-compatible bucket when
