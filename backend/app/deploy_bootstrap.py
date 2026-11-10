@@ -20,6 +20,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import Column, MetaData, String, Table, select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
@@ -284,7 +285,13 @@ async def seed_ark_provider(session: AsyncSession) -> bool:
     - 模型按 (provider, category, name) 去重创建；
     - 默认模型在未设置、或仍指向本引导创建的模型时与环境变量保持一致；不覆盖用户在 UI 中选择的其他模型。
     """
-    from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider, ProviderStatus
+    from app.models.llm import (
+        Model,
+        ModelCategoryKey,
+        ModelSettings,
+        Provider,
+        ProviderStatus,
+    )
     from app.services.ark_autoconfig import ARK_REGION_LABELS, resolve_ark_plan
 
     plan = await resolve_ark_plan(session)
@@ -393,9 +400,12 @@ async def run_deploy_bootstrap() -> dict[str, Any]:
         added_templates = await seed_prompt_templates(session)
         ark_changed = await seed_ark_provider(session)
         # 存量修复：旧版本手动新建的镜头没有 ShotDetail，无法读取时长 / 生成视频（幂等，无缺失时为空操作）。
-        from app.services.studio.shot_detail_defaults import backfill_missing_shot_details
+        from app.services.studio.shot_detail_defaults import (
+            backfill_missing_shot_details,
+        )
 
         details_backfilled = await backfill_missing_shot_details(session)
+        media_urls_rewritten = await rewrite_legacy_media_urls(session)
         await session.commit()
     async with async_session_maker() as session:
         # 会话签名密钥：没配 AUTH_SECRET 时在这里（建表后、建议锁已释放）生成一次，避免首个请求里并发生成两把
@@ -408,10 +418,33 @@ async def run_deploy_bootstrap() -> dict[str, Any]:
         "prompt_templates_added": added_templates,
         "ark_provider_changed": ark_changed,
         "shot_details_backfilled": details_backfilled,
+        "media_urls_rewritten": media_urls_rewritten,
         "storage": await ensure_storage_ready(),
     }
     logger.info("deploy bootstrap done: %s", summary)
     return summary
+
+
+async def rewrite_legacy_media_urls(session: AsyncSession) -> int:
+    """对象存储换了公网域名（`S3_PUBLIC_BASE_URL` 指向自定义域名）后，把文件表里仍指向 R2 默认 `*.r2.dev` 地址的 URL 改到新域名。
+
+    为什么存在：`FileItem.thumbnail` 在上传 / 生成时就写死了完整公网 URL，前端直接用它展示；只改环境变量
+    只能影响新文件，老作品的形象图、关键帧、视频仍会走大陆访问不稳定的 r2.dev。幂等：基址未配置或本身就是
+    r2.dev 时不动；已改写过的行不再匹配。
+    """
+    base = (settings.s3_public_base_url or "").strip().rstrip("/")
+    host = (urlsplit(base).hostname or "") if base else ""
+    if not base or not host or host.endswith(".r2.dev"):
+        return 0
+    from app.models.studio import FileItem
+
+    rows = list((await session.execute(select(FileItem).where(FileItem.thumbnail.like("https://%.r2.dev/%")))).scalars().all())
+    for row in rows:
+        row.thumbnail = f"{base}{urlsplit(row.thumbnail).path}"
+    if rows:
+        await session.flush()
+        logger.info("deploy bootstrap: rewrote %d media urls to %s", len(rows), host)
+    return len(rows)
 
 
 async def ensure_storage_ready() -> dict[str, Any]:

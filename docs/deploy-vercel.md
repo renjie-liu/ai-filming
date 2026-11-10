@@ -148,6 +148,14 @@ Notes:
   region; MinIO / RustFS with `S3_ADDRESSING_STYLE=path`).
 - Local development: put the same variables in `backend/.env` (see `.env.example`).
 
+## Custom domain (and mainland-China reachability)
+
+`*.vercel.app` and `*.r2.dev` are both unreliable from mainland China, so production should run on your own domain:
+
+1. **App**: add the hostname to the Vercel project (Settings → Domains, or `add_project_domain`) and create a **DNS-only** CNAME at your DNS provider pointing to the target Vercel shows (for this project `ddd9b80accf6a57f.vercel-dns-017.com`, or the generic `cname.vercel-dns.com`). Keep it DNS-only (grey cloud on Cloudflare) so Vercel terminates TLS and serves directly; a proxied record would put Cloudflare's challenge/CDN in front of the API. Nothing in the app changes: the SPA talks to the API same-origin and the session cookie is host-scoped.
+2. **Media**: give the R2 bucket a custom domain on a Cloudflare-hosted zone (R2 → bucket → Settings → Custom Domains, e.g. `media.<your-domain>`), then set `S3_PUBLIC_BASE_URL=https://media.<your-domain>` on the Vercel project and redeploy. New uploads use the new domain immediately; on the next cold start the bootstrap (`rewrite_legacy_media_urls`) rewrites every stored `https://pub-….r2.dev/<key>` link in the `files` table to the new base, so old works switch over as well. The CORS rule on the bucket keeps working (origins `*`).
+3. A path such as `example.com/ai-filming` is not supported: the SPA, API routes, assets and cookies all assume the site root. Use a subdomain and, if you want the path to work as an entry point, add a redirect rule from `/ai-filming*` to the subdomain at your DNS/CDN provider.
+
 ## Health check
 
 `GET /api/v1/_deploy/status` reports the database dialect and row counts, the

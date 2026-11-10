@@ -141,7 +141,7 @@ CreatorPage
 
 ### 对象存储（`app/core/storage.py`）
 
-`storage_backend()`：配置了 `S3_BUCKET_NAME` 为 `s3`，否则有 Blob 令牌为 `vercel_blob`。S3 路径对 Cloudflare R2 自动适配（端点 `*.r2.cloudflarestorage.com`：region `auto`、path-style、关闭 boto3 默认 CRC 校验、建桶不带 LocationConstraint）；对象公网 URL 为 `S3_PUBLIC_BASE_URL/<key>`（key 按 RFC 3986 转义）。`init_storage()` 建桶并写入「任意来源 GET/HEAD/PUT」的 CORS 规则（直传与合成导出 fetch 片段都要它），Vercel 上由 `deploy_bootstrap.ensure_storage_ready` 在冷启动时尽力执行，令牌无桶级权限时记为 error 不阻断。`/_deploy/status` 的 `storage` 字段给出后端、桶、端点主机、直传方式与一次 HeadBucket 探测结果。
+`storage_backend()`：配置了 `S3_BUCKET_NAME` 为 `s3`，否则有 Blob 令牌为 `vercel_blob`。S3 路径对 Cloudflare R2 自动适配（端点 `*.r2.cloudflarestorage.com`：region `auto`、path-style、关闭 boto3 默认 CRC 校验、建桶不带 LocationConstraint）；对象公网 URL 为 `S3_PUBLIC_BASE_URL/<key>`（key 按 RFC 3986 转义）。`init_storage()` 建桶并写入「任意来源 GET/HEAD/PUT」的 CORS 规则（直传与合成导出 fetch 片段都要它），Vercel 上由 `deploy_bootstrap.ensure_storage_ready` 在冷启动时尽力执行，令牌无桶级权限时记为 error 不阻断。`/_deploy/status` 的 `storage` 字段给出后端、桶、端点主机、直传方式与一次 HeadBucket 探测结果。`FileItem.thumbnail` 存的是完整公网 URL；把 `S3_PUBLIC_BASE_URL` 改成自定义域名后，部署引导的 `rewrite_legacy_media_urls` 会把仍指向 `*.r2.dev` 的老地址一次性改写到新域名（幂等，基址仍是 r2.dev 时不动）。
 
 ### api 层
 
